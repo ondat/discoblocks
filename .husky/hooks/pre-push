@@ -1,0 +1,13 @@
+#!/bin/bash
+
+if [[ -n "$(git status --short)" ]]; then
+    git stash
+    function unstash() {
+        git stash pop
+    }
+    trap unstash EXIT
+fi
+
+make manifests generate test
+
+[[ -z "$(git status --short)" ]] || (git status && exit 1)

@@ -1,0 +1,22 @@
+# in test don't use yet
+
+name: end-2-end build
+
+on:
+  push:
+    branches:
+      - main
+  
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ci-main-${{ github.ref }}-1
+  cancel-in-progress: true
+
+jobs:
+  image-build:
+    uses: ./.github/workflows/_docker-build.yml
+    env:
+      IMAGE_TAG: develop

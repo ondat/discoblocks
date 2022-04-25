@@ -1,0 +1,6 @@
+domain: discoblocks.ondat.io
+layout:
+- go.kubebuilder.io/v3
+projectName: discoblocks
+repo: github.com/ondat/discoblocks
+version: "3"
