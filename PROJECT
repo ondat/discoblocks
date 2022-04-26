@@ -3,4 +3,14 @@ layout:
 - go.kubebuilder.io/v3
 projectName: discoblocks
 repo: github.com/ondat/discoblocks
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: discoblocks.ondat.io
+  group: discoblocks.ondat.io
+  kind: DiscConfig
+  path: github.com/ondat/discoblocks/api/v1
+  version: v1
 version: "3"
