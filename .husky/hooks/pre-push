@@ -1,8 +1,9 @@
-#!/bin/bash
+#!/bin/bash -e
 
 if [[ -n "$(git status --short)" ]]; then
     git stash
     function unstash() {
+        git reset --hard
         git stash pop
     }
     trap unstash EXIT
@@ -10,4 +11,4 @@ fi
 
 make manifests generate test
 
-[[ -z "$(git status --short)" ]] || (git status && exit 1)
+git diff --exit-code --quiet || (git status && exit 1)

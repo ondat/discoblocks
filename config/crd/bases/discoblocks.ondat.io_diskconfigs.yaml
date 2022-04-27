@@ -5,20 +5,20 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.8.0
   creationTimestamp: null
-  name: discconfigs.discoblocks.ondat.io.discoblocks.ondat.io
+  name: diskconfigs.discoblocks.ondat.io
 spec:
-  group: discoblocks.ondat.io.discoblocks.ondat.io
+  group: discoblocks.ondat.io
   names:
-    kind: DiscConfig
-    listKind: DiscConfigList
-    plural: discconfigs
-    singular: discconfig
+    kind: DiskConfig
+    listKind: DiskConfigList
+    plural: diskconfigs
+    singular: diskconfig
   scope: Namespaced
   versions:
   - name: v1
     schema:
       openAPIV3Schema:
-        description: DiscConfig is the Schema for the discconfigs API
+        description: DiskConfig is the Schema for the diskconfigs API
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation
@@ -33,32 +33,79 @@ spec:
           metadata:
             type: object
           spec:
-            description: DiscConfigSpec defines the desired state of DiscConfig
+            description: DiskConfigSpec defines the desired state of DiskConfig
             properties:
               capacity:
                 default: 1Gi
                 description: Capacity represents the desired capacity of the underlying
                   volume.
-                pattern: ^([0-9]+)(m|Mi|g|Gi)$
+                pattern: ^(\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$
                 type: string
               mountPointPattern:
-                default: /media/discoblocks/{n}
-                description: MountPointPattern is the mount point of the disk. {n}
+                default: /media/discoblocks/<name>-%d
+                description: MountPointPattern is the mount point of the disk. %d
                   represents disk number in order.
-                pattern: ^/(.*){n}(.*)
+                pattern: ^/(.*)%d(.*)
                 type: string
               nodeSelector:
                 description: NodeSelector is a selector which must be true for the
                   disk to fit on a node. Selector which must match a node’s labels
                   for the disk to be provisioned on that node.
-                type: string
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: A label selector requirement is a selector that
+                        contains values, a key, and an operator that relates the key
+                        and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: operator represents a key's relationship to
+                            a set of values. Valid operators are In, NotIn, Exists
+                            and DoesNotExist.
+                          type: string
+                        values:
+                          description: values is an array of string values. If the
+                            operator is In or NotIn, the values array must be non-empty.
+                            If the operator is Exists or DoesNotExist, the values
+                            array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: matchLabels is a map of {key,value} pairs. A single
+                      {key,value} in the matchLabels map is equivalent to an element
+                      of matchExpressions, whose key field is "key", the operator
+                      is "In", and the values array contains only "value". The requirements
+                      are ANDed.
+                    type: object
+                type: object
+              podSelector:
+                additionalProperties:
+                  type: string
+                description: PodSelector is a selector which must be true for the
+                  pod to attach disk.
+                type: object
               policy:
                 description: Policy contains the disk scale policies.
                 properties:
                   maximumCapacityOfDisk:
                     description: MaximumCapacityOfDisks defines maximum capacity of
                       a disk.
-                    pattern: ^([0-9]+)(m|Mi|g|Gi)$
+                    pattern: ^(\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$
                     type: string
                   maximumNumberOfDisks:
                     default: 10
@@ -84,10 +131,10 @@ spec:
                   by the config.
                 type: string
             required:
-            - storageClassName
+            - podSelector
             type: object
           status:
-            description: DiscConfigStatus defines the observed state of DiscConfig
+            description: DiskConfigStatus defines the observed state of DiskConfig
             properties:
               conditions:
                 description: Conditions is a list of status of all the disks.
@@ -158,16 +205,20 @@ spec:
                   - type
                   type: object
                 type: array
-              nodes:
-                additionalProperties:
-                  type: string
-                type: object
               phase:
                 description: Phase is the phase of the Discoblocks provisioning.
                 enum:
                 - Ready
                 - Running
+                - Deleting
                 type: string
+              pvcs:
+                additionalProperties:
+                  additionalProperties:
+                    type: string
+                  type: object
+                description: PersistentVolumeClaims statuses
+                type: object
             type: object
         type: object
     served: true

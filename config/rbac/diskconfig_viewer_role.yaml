@@ -1,0 +1,20 @@
+# permissions for end users to view diskconfigs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: diskconfig-viewer-role
+rules:
+- apiGroups:
+  - discoblocks.ondat.io
+  resources:
+  - diskconfigs
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - discoblocks.ondat.io
+  resources:
+  - diskconfigs/status
+  verbs:
+  - get

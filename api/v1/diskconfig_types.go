@@ -17,36 +17,41 @@ limitations under the License.
 package v1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// DiscConfigSpec defines the desired state of DiscConfig
-type DiscConfigSpec struct {
+// DiskConfigSpec defines the desired state of DiskConfig
+type DiskConfigSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// StorageClassName is the of the StorageClass required by the config.
-	//+kubebuilder:validation:Required
-	StorageClassName string `json:"storageClassName" yaml:"storageClassName"`
+	//+kubebuilder:validation:Optional
+	StorageClassName string `json:"storageClassName,omitempty" yaml:"storageClassName,omitempty"`
 
 	// Capacity represents the desired capacity of the underlying volume.
 	//+kubebuilder:default:="1Gi"
-	//+kubebuilder:validation:Pattern:="^([0-9]+)(m|Mi|g|Gi)$"
+	//+kubebuilder:validation:Pattern:="^(\\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$"
 	//+kubebuilder:validation:Optional
 	Capacity string `json:"capacity,omitempty" yaml:"capacity,omitempty"`
 
-	// MountPointPattern is the mount point of the disk. {n} represents disk number in order.
-	//+kubebuilder:default:="/media/discoblocks/{n}"
-	//+kubebuilder:validation:Pattern:="^/(.*){n}(.*)"
+	// MountPointPattern is the mount point of the disk. %d represents disk number in order.
+	//+kubebuilder:default:="/media/discoblocks/<name>-%d"
+	//+kubebuilder:validation:Pattern:="^/(.*)%d(.*)"
 	//+kubebuilder:validation:Optional
 	MountPointPattern string `json:"mountPointPattern,omitempty" yaml:"mountPointPattern,omitempty"`
 
 	// NodeSelector is a selector which must be true for the disk to fit on a node. Selector which must match a node’s labels for the disk to be provisioned on that node.
 	//+kubebuilder:validation:Optional
-	NodeSelector string `json:"nodeSelector,omitempty" yaml:"nodeSelector,omitempty"`
+	NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty" yaml:"nodeSelector,omitempty"`
+
+	// PodSelector is a selector which must be true for the pod to attach disk.
+	//+kubebuilder:validation:Required
+	PodSelector map[string]string `json:"podSelector" yaml:"podSelector"`
 
 	// PrometheusEndpoint defines the metrics endpoint of disk capacity.
 	//+kubebuilder:validation:Optional
@@ -66,7 +71,7 @@ type Policy struct {
 	UpscaleTriggerPercentage uint8 `json:"upscaleTriggerPercentage,omitempty" yaml:"upscaleTriggerPercentage,omitempty"`
 
 	// MaximumCapacityOfDisks defines maximum capacity of a disk.
-	//+kubebuilder:validation:Pattern:="^([0-9]+)(m|Mi|g|Gi)$"
+	//+kubebuilder:validation:Pattern:="^(\\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$"
 	//+kubebuilder:validation:Optional
 	MaximumCapacityOfDisk string `json:"maximumCapacityOfDisk,omitempty" yaml:"maximumCapacityOfDisk,omitempty"`
 
@@ -78,8 +83,8 @@ type Policy struct {
 	MaximumNumberOfDisks uint8 `json:"maximumNumberOfDisks,omitempty" yaml:"maximumNumberOfDisks,omitempty"`
 }
 
-// DiscConfigStatus defines the observed state of DiscConfig
-type DiscConfigStatus struct {
+// DiskConfigStatus defines the observed state of DiskConfig
+type DiskConfigStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
@@ -89,38 +94,40 @@ type DiscConfigStatus struct {
 	// Conditions is a list of status of all the disks.
 	Conditions []metav1.Condition `json:"conditions,omitempty" yaml:"conditions,omitempty"`
 
-	Nodes map[string]string `json:"nodes,omitempty" yaml:"nodes,omitempty"`
+	// PersistentVolumeClaims statuses
+	PersistentVolumeClaims map[string]map[string]corev1.PersistentVolumeClaimPhase `json:"pvcs,omitempty" yaml:"pvcs,omitempty"`
 }
 
-// +kubebuilder:validation:Enum=Ready;Running
+// +kubebuilder:validation:Enum=Ready;Running;Deleting
 type Phase string
 
 const (
-	Ready   Phase = "Ready"
-	Running Phase = "Running"
+	Ready    Phase = "Ready"
+	Running  Phase = "Running"
+	Deleting Phase = "Deleting"
 )
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 
-// DiscConfig is the Schema for the discconfigs API
-type DiscConfig struct {
+// DiskConfig is the Schema for the diskconfigs API
+type DiskConfig struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   DiscConfigSpec   `json:"spec,omitempty"`
-	Status DiscConfigStatus `json:"status,omitempty"`
+	Spec   DiskConfigSpec   `json:"spec,omitempty"`
+	Status DiskConfigStatus `json:"status,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 
-// DiscConfigList contains a list of DiscConfig
-type DiscConfigList struct {
+// DiskConfigList contains a list of DiskConfig
+type DiskConfigList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []DiscConfig `json:"items"`
+	Items           []DiskConfig `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&DiscConfig{}, &DiscConfigList{})
+	SchemeBuilder.Register(&DiskConfig{}, &DiskConfigList{})
 }

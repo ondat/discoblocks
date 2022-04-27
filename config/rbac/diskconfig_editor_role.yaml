@@ -1,13 +1,13 @@
-# permissions for end users to edit discconfigs.
+# permissions for end users to edit diskconfigs.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: discconfig-editor-role
+  name: diskconfig-editor-role
 rules:
 - apiGroups:
-  - discoblocks.ondat.io.discoblocks.ondat.io
+  - discoblocks.ondat.io
   resources:
-  - discconfigs
+  - diskconfigs
   verbs:
   - create
   - delete
@@ -17,8 +17,8 @@ rules:
   - update
   - watch
 - apiGroups:
-  - discoblocks.ondat.io.discoblocks.ondat.io
+  - discoblocks.ondat.io
   resources:
-  - discconfigs/status
+  - diskconfigs/status
   verbs:
   - get
