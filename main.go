@@ -19,6 +19,7 @@ package main
 import (
 	"flag"
 	"os"
+	"strings"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -86,11 +87,18 @@ func main() {
 	}
 
 	//
-	if err = (&controllers.DiscConfigReconciler{
+	if err = (&controllers.DiskConfigReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "DiscConfig")
+		setupLog.Error(err, "unable to create controller", "controller", "DiskConfig")
+		os.Exit(1)
+	}
+
+	provisioners := strings.Split(strings.ReplaceAll(os.Getenv("SUPPORTED_CSI_DRIVERS"), " ", ""), ",")
+
+	if err = (&discoblocksondatiov1.DiskConfigWebhook{}).SetupWebhookWithManager(mgr, provisioners); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "DiskConfig")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

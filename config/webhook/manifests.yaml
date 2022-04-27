@@ -1,0 +1,28 @@
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  creationTimestamp: null
+  name: validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-discoblocks-ondat-io-discoblocks-ondat-io-v1-diskConfig
+  failurePolicy: Fail
+  name: vdiskConfig.kb.io
+  rules:
+  - apiGroups:
+    - discoblocks.ondat.io.discoblocks.ondat.io
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    - DELETE
+    resources:
+    - diskConfigs
+  sideEffects: None

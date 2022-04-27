@@ -23,8 +23,8 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// DiscConfigSpec defines the desired state of DiscConfig
-type DiscConfigSpec struct {
+// DiskConfigSpec defines the desired state of DiskConfig
+type DiskConfigSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
@@ -34,7 +34,7 @@ type DiscConfigSpec struct {
 
 	// Capacity represents the desired capacity of the underlying volume.
 	//+kubebuilder:default:="1Gi"
-	//+kubebuilder:validation:Pattern:="^([0-9]+)(m|Mi|g|Gi)$"
+	//+kubebuilder:validation:Pattern:="^(d+)(m|Mi|g|Gi|t|Ti|p|Pi)$"
 	//+kubebuilder:validation:Optional
 	Capacity string `json:"capacity,omitempty" yaml:"capacity,omitempty"`
 
@@ -66,7 +66,7 @@ type Policy struct {
 	UpscaleTriggerPercentage uint8 `json:"upscaleTriggerPercentage,omitempty" yaml:"upscaleTriggerPercentage,omitempty"`
 
 	// MaximumCapacityOfDisks defines maximum capacity of a disk.
-	//+kubebuilder:validation:Pattern:="^([0-9]+)(m|Mi|g|Gi)$"
+	//+kubebuilder:validation:Pattern:="^(d+)(m|Mi|g|Gi|t|Ti|p|Pi)$"
 	//+kubebuilder:validation:Optional
 	MaximumCapacityOfDisk string `json:"maximumCapacityOfDisk,omitempty" yaml:"maximumCapacityOfDisk,omitempty"`
 
@@ -78,8 +78,8 @@ type Policy struct {
 	MaximumNumberOfDisks uint8 `json:"maximumNumberOfDisks,omitempty" yaml:"maximumNumberOfDisks,omitempty"`
 }
 
-// DiscConfigStatus defines the observed state of DiscConfig
-type DiscConfigStatus struct {
+// DiskConfigStatus defines the observed state of DiskConfig
+type DiskConfigStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
@@ -103,24 +103,24 @@ const (
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 
-// DiscConfig is the Schema for the discconfigs API
-type DiscConfig struct {
+// DiskConfig is the Schema for the diskConfigs API
+type DiskConfig struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   DiscConfigSpec   `json:"spec,omitempty"`
-	Status DiscConfigStatus `json:"status,omitempty"`
+	Spec   DiskConfigSpec   `json:"spec,omitempty"`
+	Status DiskConfigStatus `json:"status,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 
-// DiscConfigList contains a list of DiscConfig
-type DiscConfigList struct {
+// DiskConfigList contains a list of DiskConfig
+type DiskConfigList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []DiscConfig `json:"items"`
+	Items           []DiskConfig `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&DiscConfig{}, &DiscConfigList{})
+	SchemeBuilder.Register(&DiskConfig{}, &DiskConfigList{})
 }

@@ -27,36 +27,47 @@ import (
 	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
 )
 
-// DiscConfigReconciler reconciles a DiscConfig object
-type DiscConfigReconciler struct {
+// DiskConfigReconciler reconciles a DiskConfig object
+type DiskConfigReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 }
 
-//+kubebuilder:rbac:groups=discoblocks.ondat.io.discoblocks.ondat.io,resources=discconfigs,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=discoblocks.ondat.io.discoblocks.ondat.io,resources=discconfigs/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=discoblocks.ondat.io.discoblocks.ondat.io,resources=discconfigs/finalizers,verbs=update
+//+kubebuilder:rbac:groups=discoblocks.ondat.io.discoblocks.ondat.io,resources=diskConfigs,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=discoblocks.ondat.io.discoblocks.ondat.io,resources=diskConfigs/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=discoblocks.ondat.io.discoblocks.ondat.io,resources=diskConfigs/finalizers,verbs=update
+//+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;create;update
+//+kubebuilder:rbac:groups="",resources=persistentvolumeclaims/finalizers,verbs=update
+//+kubebuilder:rbac:groups="storage.k8s.io",resources=storageclasses,verbs=get
+//+kubebuilder:rbac:groups="storage.k8s.io",resources=storageclasses/finalizers,verbs=update
+//+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the DiscConfig object against the actual cluster state, and then
+// Modify the Reconcile function to compare the state specified by
+// the DiskConfig object against the actual cluster state, and then
 // perform operations to make the cluster state reflect the state specified by
 // the user.
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.11.0/pkg/reconcile
-func (r *DiscConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := log.FromContext(ctx).WithName("DiskConfigReconciler")
 
-	// TODO(user): your logic here
+	if locked := lock.TryLock(); !locked {
+		logger.Info("Another operation is on going, event needs to be resceduled")
+		return ctrl.Result{Requeue: true}, nil
+	}
+	defer lock.Unlock()
+
+	// storage class finalizer
 
 	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *DiscConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *DiskConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&discoblocksondatiov1.DiscConfig{}).
+		For(&discoblocksondatiov1.DiskConfig{}).
 		Complete(r)
 }

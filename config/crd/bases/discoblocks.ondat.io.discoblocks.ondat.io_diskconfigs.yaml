@@ -5,14 +5,14 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.8.0
   creationTimestamp: null
-  name: diskConfigs.discoblocks.ondat.io.discoblocks.ondat.io
+  name: diskconfigs.discoblocks.ondat.io.discoblocks.ondat.io
 spec:
   group: discoblocks.ondat.io.discoblocks.ondat.io
   names:
     kind: DiskConfig
     listKind: DiskConfigList
-    plural: diskConfigs
-    singular: diskConfig
+    plural: diskconfigs
+    singular: diskconfig
   scope: Namespaced
   versions:
   - name: v1
@@ -39,7 +39,7 @@ spec:
                 default: 1Gi
                 description: Capacity represents the desired capacity of the underlying
                   volume.
-                pattern: ^(\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$
+                pattern: ^(d+)(m|Mi|g|Gi|t|Ti|p|Pi)$
                 type: string
               mountPointPattern:
                 default: /media/discoblocks/{n}
@@ -58,7 +58,7 @@ spec:
                   maximumCapacityOfDisk:
                     description: MaximumCapacityOfDisks defines maximum capacity of
                       a disk.
-                    pattern: ^(\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$
+                    pattern: ^(d+)(m|Mi|g|Gi|t|Ti|p|Pi)$
                     type: string
                   maximumNumberOfDisks:
                     default: 10

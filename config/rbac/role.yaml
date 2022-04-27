@@ -6,9 +6,32 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  verbs:
+  - create
+  - get
+  - list
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims/finalizers
+  verbs:
+  - update
+- apiGroups:
   - discoblocks.ondat.io.discoblocks.ondat.io
   resources:
-  - discconfigs
+  - diskConfigs
   verbs:
   - create
   - delete
@@ -20,14 +43,26 @@ rules:
 - apiGroups:
   - discoblocks.ondat.io.discoblocks.ondat.io
   resources:
-  - discconfigs/finalizers
+  - diskConfigs/finalizers
   verbs:
   - update
 - apiGroups:
   - discoblocks.ondat.io.discoblocks.ondat.io
   resources:
-  - discconfigs/status
+  - diskConfigs/status
   verbs:
   - get
   - patch
+  - update
+- apiGroups:
+  - storage.k8s.io
+  resources:
+  - storageclasses
+  verbs:
+  - get
+- apiGroups:
+  - storage.k8s.io
+  resources:
+  - storageclasses/finalizers
+  verbs:
   - update

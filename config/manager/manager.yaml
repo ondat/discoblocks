@@ -33,6 +33,8 @@ spec:
         - --leader-elect
         image: controller:latest
         name: manager
+        env:
+          SUPPORTED_CSI_DRIVERS: "ebs.csi.aws.com"
         securityContext:
           allowPrivilegeEscalation: false
         livenessProbe:

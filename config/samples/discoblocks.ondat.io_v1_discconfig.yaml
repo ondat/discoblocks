@@ -1,6 +1,6 @@
 apiVersion: discoblocks.ondat.io.discoblocks.ondat.io/v1
-kind: DiscConfig
+kind: DiskConfig
 metadata:
-  name: discconfig-sample
+  name: diskConfig-sample
 spec:
   # TODO(user): Add fields here
