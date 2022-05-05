@@ -8,6 +8,13 @@ jobs:
     runs-on: "ubuntu-latest"
     steps:
 
+      - name: log in to ghrc.io 
+      uses: docker/login-action@1edf6180e07d2ffb423fc48a1a552855c0a1f508
+      with: 
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@f39d29766a1eb7432c47f6bb7b64ed70b2241524
         with:
