@@ -2,8 +2,8 @@ package utils
 
 import (
 	"fmt"
+	"strings"
 
-	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/yaml"
 )
@@ -35,8 +35,20 @@ func RenderFinalizer(id string) string {
 }
 
 // RenderPVCName calculates PVC name
-func RenderPVCName(pod string, config *discoblocksondatiov1.DiskConfig) string {
-	return fmt.Sprintf("discoblocks-%d-%d-%d", Hash(pod), Hash(config.CreationTimestamp.String()), Hash(config.Namespace+config.Name))
+func RenderPVCName(elems ...string) (string, error) {
+	builder := strings.Builder{}
+	builder.WriteString("discoblocks")
+
+	for _, e := range elems {
+		hash, err := Hash(e)
+		if err != nil {
+			return "", fmt.Errorf("unable to calculate hash of %s: %w", e, err)
+		}
+
+		builder.WriteString(fmt.Sprintf("-%d", hash))
+	}
+
+	return builder.String(), nil
 }
 
 // RenderSidecar returns the sidecar

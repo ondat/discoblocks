@@ -91,8 +91,12 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 			return admission.Allowed("Driver not found: " + sc.Provisioner)
 		}
 
-		// TODO time.Now() makes PVC not reusable
-		pvcName := utils.RenderPVCName(time.Now().String(), &config)
+		// TODO time.Now() blocks PVC reuse
+		pvcName, err := utils.RenderPVCName(time.Now().String(), config.CreationTimestamp.String(), config.Namespace+config.Name)
+		if err != nil {
+			logger.Error(err, "Unable to calculate hash")
+			return admission.Allowed("unable to calculate hash")
+		}
 		logger = logger.WithValues("pvc_name", pvcName)
 
 		pvc, err := driver.GetPVCStub(pvcName, config.Namespace, config.Spec.StorageClassName)
