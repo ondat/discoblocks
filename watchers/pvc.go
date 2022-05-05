@@ -51,6 +51,7 @@ func (w PVCWatcher) Watch(ctx context.Context) <-chan error {
 				}
 			}
 
+			// TODO on delete delete finalizers and from status
 			if event.Type != watch.Modified {
 				continue
 			}
