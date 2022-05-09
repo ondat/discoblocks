@@ -36,6 +36,8 @@ spec:
         env:
           - name: SUPPORTED_CSI_DRIVERS
             value: "ebs.csi.aws.com"
+          - name: SCHEDULER_STRICT_MODE
+            value: "true"
         securityContext:
           allowPrivilegeEscalation: false
         volumeMounts:

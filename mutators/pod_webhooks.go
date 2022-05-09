@@ -45,7 +45,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
-	logger.Info("Fetching configs...")
+	logger.Info("Fetch configs...")
 
 	diskConfigs := discoblocksondatiov1.DiskConfigList{}
 	if err := a.Client.List(ctx, &diskConfigs, &client.ListOptions{
@@ -63,7 +63,8 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 			continue
 		}
 
-		logger = logger.WithValues("name", config.Name, "sc_name", config.Spec.StorageClassName)
+		//nolint:govet // logger is ok to shadowing
+		logger := logger.WithValues("name", config.Name, "sc_name", config.Spec.StorageClassName)
 		logger.Info("Attach volume to workload...")
 
 		capacity, err := resource.ParseQuantity(config.Spec.Capacity)
@@ -105,15 +106,14 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 			return admission.Allowed("Unable to init a PVC")
 		}
 
-		pvc.Finalizers = []string{utils.RenderFinalizer(string(config.UID))}
+		pvc.Finalizers = []string{utils.RenderFinalizer(config.Name)}
 		pvc.Labels = map[string]string{
-			"discoblocks":      string(config.UID),
-			"discoblocks/name": config.Name,
+			"discoblocks": config.Name,
 		}
 		pvc.Spec.Resources.Requests[corev1.ResourceStorage] = capacity
 
 		logger.Info("Create PVCs...")
-		if err := a.Client.Create(ctx, pvc); err != nil {
+		if err = a.Client.Create(ctx, pvc); err != nil {
 			logger.Info("Failed to create PVC", "error", err.Error())
 			return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to create PVC: %w", err))
 		}

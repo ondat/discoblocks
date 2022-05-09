@@ -16,6 +16,7 @@ var schedulerLog = logf.Log.WithName("scheduler")
 // Scheduler HTTP service for schedulers
 type Scheduler struct {
 	client.Client
+	strict bool
 	logger logr.Logger
 }
 
@@ -31,6 +32,7 @@ func (s *Scheduler) Start(ctx context.Context) <-chan error {
 
 		podFilterPlugin := podFilter{
 			Client: s.Client,
+			strict: s.strict,
 			logger: s.logger.WithName("pod"),
 		}
 
@@ -48,9 +50,10 @@ func (s *Scheduler) Start(ctx context.Context) <-chan error {
 }
 
 // NewScheduler creates a new scheduler
-func NewScheduler(kubeClient client.Client) *Scheduler {
+func NewScheduler(kubeClient client.Client, strict bool) *Scheduler {
 	return &Scheduler{
 		Client: kubeClient,
+		strict: strict,
 		logger: schedulerLog,
 	}
 }

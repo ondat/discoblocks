@@ -30,8 +30,14 @@ func RenderMountPoint(pattern, name string, index int) string {
 }
 
 // RenderFinalizer calculates finalizer name
-func RenderFinalizer(id string) string {
-	return fmt.Sprintf("discoblocks.io/%s", id)
+func RenderFinalizer(name string, extras ...string) string {
+	finalizer := fmt.Sprintf("discoblocks.io/%s", name)
+
+	for _, e := range extras {
+		finalizer = finalizer + "-" + e
+	}
+
+	return finalizer
 }
 
 // RenderPVCName calculates PVC name
@@ -59,17 +65,6 @@ func RenderSidecar() (*corev1.Container, error) {
 	}
 
 	return &sidecar, nil
-}
-
-// IsContainsString finds string in array
-func IsContainsString(s string, arr []string) bool {
-	for _, e := range arr {
-		if e == s {
-			return true
-		}
-	}
-
-	return false
 }
 
 // IsContainsAll finds for a contains all b

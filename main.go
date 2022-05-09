@@ -20,6 +20,7 @@ import (
 	"context"
 	"flag"
 	"os"
+	"strconv"
 	"strings"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -143,20 +144,31 @@ func main() {
 		os.Exit(1)
 	}()
 
-	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
 		cancel()
 		os.Exit(1)
 	}
 	// TODO proper ready check would be nice
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+	if err = mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
 		cancel()
 		os.Exit(1)
 	}
 
+	strictScheduler := false
+	rawStrictScheduler := os.Getenv("SCHEDULER_STRICT_MODE")
+	if rawStrictScheduler != "" {
+		strictScheduler, err = strconv.ParseBool(rawStrictScheduler)
+		if err != nil {
+			setupLog.Error(err, "unable to parse SCHEDULER_STRICT_MODE")
+			cancel()
+			os.Exit(1)
+		}
+	}
+
 	// TODO leader election is missing
-	scheduler := schedulers.NewScheduler(mgr.GetClient())
+	scheduler := schedulers.NewScheduler(mgr.GetClient(), strictScheduler)
 	schedulerErrChan := scheduler.Start(ctx)
 	go func() {
 		setupLog.Error(<-schedulerErrChan, "there was an error in scheduler")
@@ -165,7 +177,7 @@ func main() {
 	}()
 
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err = mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		cancel()
 		os.Exit(1)

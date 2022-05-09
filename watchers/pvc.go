@@ -3,6 +3,7 @@ package watchers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
@@ -51,8 +52,7 @@ func (w PVCWatcher) Watch(ctx context.Context) <-chan error {
 				}
 			}
 
-			// TODO on delete delete finalizers and from status
-			if event.Type != watch.Modified {
+			if event.Type != watch.Modified && event.Type != watch.Deleted {
 				continue
 			}
 
@@ -65,17 +65,12 @@ func (w PVCWatcher) Watch(ctx context.Context) <-chan error {
 			logger := pvcWatcherLog.WithValues("name", pvc.Name)
 			logger.Info("Update PVC phase...")
 
-			if _, ok := pvc.Labels["discoblocks/name"]; !ok {
-				pvcWatcherLog.Info("Label not found")
-				continue
-			}
-
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 
-			logger.Info("Fetching DiskConfig...")
+			logger.Info("Fetch DiskConfig...")
 
 			config := discoblocksondatiov1.DiskConfig{}
-			if err := w.kubeClient.Get(ctx, types.NamespacedName{Namespace: pvc.Namespace, Name: pvc.Labels["discoblocks/name"]}, &config); err != nil {
+			if err := w.kubeClient.Get(ctx, types.NamespacedName{Namespace: pvc.Namespace, Name: pvc.Labels["discoblocks"]}, &config); err != nil {
 				cancel()
 
 				if apierrors.IsNotFound(err) {
@@ -88,14 +83,29 @@ func (w PVCWatcher) Watch(ctx context.Context) <-chan error {
 			}
 			logger = logger.WithValues("dc_name", config.Name)
 
-			if config.Status.PersistentVolumeClaims == nil {
-				config.Status.PersistentVolumeClaims = map[string]map[string]corev1.PersistentVolumeClaimPhase{}
-			}
-			if config.Status.PersistentVolumeClaims[string(config.UID)] == nil {
-				config.Status.PersistentVolumeClaims[string(config.UID)] = map[string]corev1.PersistentVolumeClaimPhase{}
-			}
+			switch event.Type {
+			case watch.Deleted:
+				if _, ok := config.Status.PersistentVolumeClaims[config.Name]; ok {
+					logger.Info("Remove status")
+					delete(config.Status.PersistentVolumeClaims[config.Name], pvc.Name)
+				}
 
-			config.Status.PersistentVolumeClaims[string(config.UID)][pvc.Name] = pvc.Status.Phase
+				if len(config.Status.PersistentVolumeClaims[config.Name]) == 0 {
+					delete(config.Status.PersistentVolumeClaims, config.Name)
+				}
+			case watch.Modified:
+				if config.Status.PersistentVolumeClaims == nil {
+					config.Status.PersistentVolumeClaims = map[string]map[string]corev1.PersistentVolumeClaimPhase{}
+				}
+				if config.Status.PersistentVolumeClaims[config.Name] == nil {
+					config.Status.PersistentVolumeClaims[config.Name] = map[string]corev1.PersistentVolumeClaimPhase{}
+				}
+
+				logger.Info("Add status", "phase", pvc.Status.Phase)
+				config.Status.PersistentVolumeClaims[config.Name][pvc.Name] = pvc.Status.Phase
+			case watch.Added, watch.Bookmark, watch.Error:
+				panic(fmt.Errorf("event type not supported: %s", event.Type))
+			}
 
 			// TODO update conditions
 

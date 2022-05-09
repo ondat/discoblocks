@@ -18,7 +18,9 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -33,6 +35,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/go-logr/logr"
@@ -76,74 +81,174 @@ func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
+	logger.Info("Fetch PVCs...")
+
+	label, err := labels.NewRequirement("discoblocks", selection.Equals, []string{req.Name})
+	if err != nil {
+		logger.Error(err, "Unable to parse PVC label selector")
+		return ctrl.Result{}, nil
+	}
+	pvcSelector := labels.NewSelector().Add(*label)
+
+	pvcList := corev1.PersistentVolumeClaimList{}
+	if err = r.List(ctx, &pvcList, &client.ListOptions{
+		Namespace:     req.Namespace,
+		LabelSelector: pvcSelector,
+	}); err != nil {
+		logger.Info("Failed to list PVCs", "error", err.Error())
+		return ctrl.Result{}, fmt.Errorf("unable to list PVCs: %w", err)
+	}
+
+	scFinalizer := utils.RenderFinalizer(req.Name, req.Namespace)
+
 	config := discoblocksondatiov1.DiskConfig{}
-	if err := r.Get(ctx, req.NamespacedName, &config); err != nil {
-		if apierrors.IsNotFound(err) {
-			logger.Info("DiskConfig not found")
-			return ctrl.Result{}, nil
+	err = r.Get(ctx, req.NamespacedName, &config)
+	switch {
+	case err != nil && apierrors.IsNotFound(err):
+		logger.Info("DiskConfig not found")
+
+		logger.Info("Fetch StrorageClasses...")
+
+		scList := storagev1.StorageClassList{}
+		if err = r.Client.List(ctx, &scList); err != nil {
+			return ctrl.Result{}, fmt.Errorf("unable to list StorageClasses: %w", err)
 		}
 
-		return ctrl.Result{}, fmt.Errorf("unable to fetch DiskConfig: %w", err)
-	}
-	logger = logger.WithValues("sc_name", config.Spec.StorageClassName)
+		for i := range scList.Items {
+			if controllerutil.ContainsFinalizer(&scList.Items[i], scFinalizer) {
+				controllerutil.RemoveFinalizer(&scList.Items[i], scFinalizer)
 
-	if config.DeletionTimestamp != nil {
+				//nolint:govet // logger is ok to shadowing
+				logger := logger.WithValues("sc_name", scList.Items[i].Name)
+				logger.Info("Remove StorageClass finalizer...", "finalizer", scFinalizer)
+
+				if err = r.Client.Update(ctx, &scList.Items[i]); err != nil {
+					logger.Info("Failed to remove finalizer of StorageClass", "error", err.Error())
+					return ctrl.Result{}, fmt.Errorf("unable to remove finalizer of StorageClass: %w", err)
+				}
+			}
+		}
+
+		return r.reconcileDelete(ctx, req.Name, &pvcList, logger.WithValues("mode", "delete"))
+	case err != nil:
+		return ctrl.Result{}, fmt.Errorf("unable to fetch DiskConfig: %w", err)
+	case config.DeletionTimestamp != nil:
 		logger.Info("DiskConfig delet in progress")
 
 		config.Status.Phase = discoblocksondatiov1.Deleting
-		if err := r.Client.Status().Update(ctx, &config); err != nil {
+		if err = r.Client.Status().Update(ctx, &config); err != nil {
 			logger.Info("Unable to update DiskConfig status", "error", err.Error())
 			return ctrl.Result{}, fmt.Errorf("unable to update DiskConfig status: %w", err)
 		}
 
-		// TODO delete finalizers [PVC, SC]
-
-		return ctrl.Result{}, nil
-	}
-
-	config.Status.Phase = discoblocksondatiov1.Running
-	if err := r.Client.Status().Update(ctx, &config); err != nil {
-		logger.Info("Unable to update DiskConfig status", "error", err.Error())
-		return ctrl.Result{}, fmt.Errorf("unable to update DiskConfig status: %w", err)
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
 	logger.Info("Fetch StorageClass...")
 
+	config.Status.Phase = discoblocksondatiov1.Running
+	if err = r.Client.Status().Update(ctx, &config); err != nil {
+		logger.Info("Unable to update DiskConfig status", "error", err.Error())
+		return ctrl.Result{}, fmt.Errorf("unable to update DiskConfig status: %w", err)
+	}
+
 	sc := storagev1.StorageClass{}
-	if err := r.Get(ctx, types.NamespacedName{Name: config.Spec.StorageClassName}, &sc); err != nil {
+	if err = r.Get(ctx, types.NamespacedName{Name: config.Spec.StorageClassName}, &sc); err != nil {
 		if apierrors.IsNotFound(err) {
 			// TODO create default storageclass
 			logger.Info("StorageClass not found")
 			return ctrl.Result{RequeueAfter: time.Minute}, nil
 		}
+
 		logger.Info("Unable to fetch StorageClass", "error", err.Error())
 		return ctrl.Result{}, fmt.Errorf("unable to fetch StorageClass: %w", err)
 	}
+	logger = logger.WithValues("sc_name", config.Spec.StorageClassName)
 
-	result, recErr := r.reconcile(ctx, &config, &sc, logger)
+	if !controllerutil.ContainsFinalizer(&sc, scFinalizer) {
+		controllerutil.AddFinalizer(&sc, scFinalizer)
 
-	if !result.Requeue && result.RequeueAfter == 0 {
-		finalizer := utils.RenderFinalizer(string(config.UID))
+		logger.Info("Update StorageClass finalizer...", "finalizer", scFinalizer)
 
-		if !utils.IsContainsString(finalizer, sc.Finalizers) {
-			logger.Info("Update StorageClass finalizer...", "finalizer", finalizer)
-
-			sc.Finalizers = append(sc.Finalizers, finalizer)
-
-			if err := r.Client.Update(ctx, &sc); err != nil {
-				logger.Info("Failed to update StorageClass", "error", err.Error())
-				if recErr != nil {
-					err = fmt.Errorf("reconcile error: %w", recErr)
-				}
-				return ctrl.Result{}, fmt.Errorf("unable to update StorageClass: %w", err)
-			}
+		if err = r.Client.Update(ctx, &sc); err != nil {
+			logger.Info("Failed to update StorageClass", "error", err.Error())
+			return ctrl.Result{}, fmt.Errorf("unable to update StorageClass: %w", err)
 		}
 	}
 
-	return result, recErr
+	var result ctrl.Result
+	result, err = r.reconcileUpdate(ctx, &config, &sc, &pvcList, logger.WithValues("mode", "update"))
+	if err == nil {
+		config.Status.Phase = discoblocksondatiov1.Ready
+		if err = r.Client.Status().Update(ctx, &config); err != nil {
+			logger.Info("Unable to update DiskConfig status", "error", err.Error())
+			return ctrl.Result{}, fmt.Errorf("unable to update DiskConfig status: %w", err)
+		}
+	}
+
+	return result, err
 }
 
-func (r *DiskConfigReconciler) reconcile(ctx context.Context, config *discoblocksondatiov1.DiskConfig, sc *storagev1.StorageClass, logger logr.Logger) (ctrl.Result, error) {
+func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName string, pvcs *corev1.PersistentVolumeClaimList, logger logr.Logger) (ctrl.Result, error) {
+	logger.Info("Update PVCs...")
+
+	pvcFinalizer := utils.RenderFinalizer(configName)
+
+	sem := utils.CreateSemaphore(concurrency, time.Nanosecond)
+	errChan := make(chan error)
+	wg := sync.WaitGroup{}
+
+	for i := range pvcs.Items {
+		wg.Add(1)
+
+		i := i
+		go func() {
+			defer wg.Done()
+
+			unlock, err := utils.WaitForSemaphore(ctx, sem, errChan)
+			if err != nil {
+				logger.Info("Context deadline")
+				errChan <- fmt.Errorf("context deadline %s->%s", pvcs.Items[i].GetNamespace(), pvcs.Items[i].GetName())
+			}
+			defer unlock()
+
+			if controllerutil.ContainsFinalizer(&pvcs.Items[i], pvcFinalizer) {
+				controllerutil.RemoveFinalizer(&pvcs.Items[i], pvcFinalizer)
+
+				//nolint:govet // logger is ok to shadowing
+				logger := logger.WithValues("pvc_name", pvcs.Items[i].Name, "pvc_namespace", pvcs.Items[i].Namespace)
+				logger.Info("Update PVC finalizer...", "finalizer", pvcFinalizer)
+
+				if err = r.Update(ctx, &pvcs.Items[i]); err != nil {
+					logger.Info("Failed to remove finalizer of PVC", "error", err.Error())
+					errChan <- fmt.Errorf("unable to remove finalizer of PVC %s->%s: %w", pvcs.Items[i].Namespace, pvcs.Items[i].Name, err)
+				}
+			}
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(errChan)
+	}()
+
+	errs := []string{}
+
+	for {
+		err, ok := <-errChan
+		if !ok {
+			if len(errs) != 0 {
+				return ctrl.Result{}, fmt.Errorf("some PVC updates failed: %s", strings.Join(errs, "\t"))
+			}
+
+			return ctrl.Result{}, nil
+		}
+
+		errs = append(errs, err.Error())
+	}
+}
+
+func (r *DiskConfigReconciler) reconcileUpdate(ctx context.Context, config *discoblocksondatiov1.DiskConfig, sc *storagev1.StorageClass, pvcs *corev1.PersistentVolumeClaimList, logger logr.Logger) (ctrl.Result, error) {
 	capacity, err := resource.ParseQuantity(config.Spec.Capacity)
 	if err != nil {
 		logger.Error(err, "Capacity is invalid")
@@ -170,22 +275,8 @@ func (r *DiskConfigReconciler) reconcile(ctx context.Context, config *discoblock
 		return ctrl.Result{RequeueAfter: time.Minute}, fmt.Errorf("invalid StorageClass: %w", err)
 	}
 
-	logger.Info("Fetching PVCs...")
-
-	req, err := labels.NewRequirement("discoblocks", selection.Equals, []string{string(config.UID)})
-	if err != nil {
-		logger.Error(err, "Unable to parse PVC label selector")
+	if len(pvcs.Items) == 0 {
 		return ctrl.Result{}, nil
-	}
-	pvcSelector := labels.NewSelector().Add(*req)
-
-	pvcList := corev1.PersistentVolumeClaimList{}
-	if err := r.List(ctx, &pvcList, &client.ListOptions{
-		Namespace:     config.Namespace,
-		LabelSelector: pvcSelector,
-	}); err != nil {
-		logger.Info("Failed to list PVCs", "error", err.Error())
-		return ctrl.Result{}, fmt.Errorf("unable to list PVCs: %w", err)
 	}
 
 	logger.Info("Update PVCs...")
@@ -194,28 +285,17 @@ func (r *DiskConfigReconciler) reconcile(ctx context.Context, config *discoblock
 	errChan := make(chan error)
 	wg := sync.WaitGroup{}
 
-	for i := range pvcList.Items {
+	for i := range pvcs.Items {
 		wg.Add(1)
-		i := i
 
+		i := i
 		go func() {
 			defer wg.Done()
 
-			var unlock func()
-		LOCK:
-			for {
-				select {
-				case <-ctx.Done():
-					logger.Info("Context deadline")
-					errChan <- fmt.Errorf("context deadline %s->%s", pvcList.Items[i].Namespace, pvcList.Items[i].Name)
-					return
-				default:
-					var lock bool
-					lock, unlock = sem()
-					if lock {
-						break LOCK
-					}
-				}
+			unlock, err := utils.WaitForSemaphore(ctx, sem, errChan)
+			if err != nil {
+				logger.Info("Context deadline")
+				errChan <- fmt.Errorf("context deadline %s->%s", pvcs.Items[i].GetNamespace(), pvcs.Items[i].GetName())
 			}
 			defer unlock()
 
@@ -227,14 +307,15 @@ func (r *DiskConfigReconciler) reconcile(ctx context.Context, config *discoblock
 				return
 			}
 
-			pvcList.Items[i].Spec.Resources.Requests[corev1.ResourceStorage] = capacity
+			pvcs.Items[i].Spec.Resources.Requests[corev1.ResourceStorage] = capacity
 
-			logger = logger.WithValues("pvc_name", pvcList.Items[i].Name, "pvc_namespace", pvcList.Items[i].Namespace)
-
+			//nolint:govet // logger is ok to shadowing
+			logger := logger.WithValues("pvc_name", pvcs.Items[i].Name, "pvc_namespace", pvcs.Items[i].Namespace)
 			logger.Info("Update PVC...")
-			if err := r.Update(ctx, &pvcList.Items[i]); err != nil {
+
+			if err = r.Update(ctx, &pvcs.Items[i]); err != nil {
 				logger.Info("Failed to update PVC", "error", err.Error())
-				errChan <- fmt.Errorf("unable to update PVC %s->%s: %w", pvcList.Items[i].Namespace, pvcList.Items[i].Name, err)
+				errChan <- fmt.Errorf("unable to update PVC %s->%s: %w", pvcs.Items[i].Namespace, pvcs.Items[i].Name, err)
 			}
 		}()
 	}
@@ -260,9 +341,44 @@ func (r *DiskConfigReconciler) reconcile(ctx context.Context, config *discoblock
 	}
 }
 
+type eventFilter struct {
+	logger logr.Logger
+}
+
+func (ef eventFilter) Create(_ event.CreateEvent) bool {
+	return true
+}
+
+func (ef eventFilter) Delete(_ event.DeleteEvent) bool {
+	return true
+}
+
+func (ef eventFilter) Update(e event.UpdateEvent) bool {
+	newObj, ok := e.ObjectNew.(*discoblocksondatiov1.DiskConfig)
+	if !ok {
+		ef.logger.Error(errors.New("unsupported type"), "Unable to cast new object")
+		return false
+	}
+	oldObj, ok := e.ObjectOld.(*discoblocksondatiov1.DiskConfig)
+	if !ok {
+		ef.logger.Error(errors.New("unsupported type"), "Unable to cast old object")
+		return false
+	}
+
+	return !reflect.DeepEqual(oldObj.Spec, newObj.Spec)
+}
+
+func (ef eventFilter) Generic(_ event.GenericEvent) bool {
+	return false
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *DiskConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&discoblocksondatiov1.DiskConfig{}).
+		WithEventFilter(eventFilter{logger: mgr.GetLogger().WithName("DiskConfigReconciler")}).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 1,
+		}).
 		Complete(r)
 }

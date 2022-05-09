@@ -73,8 +73,7 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 		return errors.New("invalid StorageClass name")
 	}
 
-	_, err := resource.ParseQuantity(r.Spec.Policy.MaximumCapacityOfDisk)
-	if err != nil {
+	if _, err := resource.ParseQuantity(r.Spec.Policy.MaximumCapacityOfDisk); err != nil {
 		logger.Info("Max capacity is invalid")
 		return errors.New("invalid max capacity")
 	}
@@ -125,7 +124,7 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 	defer cancel()
 
 	logger = logger.WithValues("sc_name", r.Spec.StorageClassName)
-	logger.Info("Fetching StorageClass...")
+	logger.Info("Fetch StorageClass...")
 
 	sc := storagev1.StorageClass{}
 	if err = diskConfigWebhookDependencies.client.Get(ctx, types.NamespacedName{Name: r.Spec.StorageClassName}, &sc); err != nil {
@@ -149,7 +148,7 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 		return errors.New("driver not found")
 	}
 
-	if err := driver.IsStorageClassValid(&sc); err != nil {
+	if err = driver.IsStorageClassValid(&sc); err != nil {
 		logger.Info("Invalid StorageClass", "error", err.Error())
 		return fmt.Errorf("invalid StorageClass: %w", err)
 	}
@@ -163,5 +162,5 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 func (r *DiskConfig) ValidateDelete() error {
 	diskConfigLog.Info("validate delete", "name", r.Name)
 
-	return errors.New("deletion of DiskConfig not allowed")
+	return nil
 }

@@ -16,6 +16,7 @@ import (
 
 type podFilter struct {
 	client.Client
+	strict bool
 	logger logr.Logger
 }
 
@@ -28,6 +29,11 @@ func (s *podFilter) Name() string {
 func (s *podFilter) Filter(ctx context.Context, state *framework.CycleState, pod *corev1.Pod, nodeInfo *framework.NodeInfo) *framework.Status {
 	logger := s.logger.WithName(pod.Name).WithValues("namespace", pod.Name, "node", nodeInfo.Node().Name)
 
+	errorStatus := framework.Success
+	if s.strict {
+		errorStatus = framework.Error
+	}
+
 	logger.Info("Scheduling...")
 	defer logger.Info("Scheduled")
 
@@ -39,7 +45,7 @@ func (s *podFilter) Filter(ctx context.Context, state *framework.CycleState, pod
 		Namespace: pod.Namespace,
 	}); err != nil {
 		logger.Error(err, "Failed to fetch DiskConfigs")
-		framework.NewStatus(framework.Success, err.Error())
+		framework.NewStatus(errorStatus, err.Error())
 	}
 
 	nodeSelector := map[string]string{}
@@ -55,7 +61,7 @@ func (s *podFilter) Filter(ctx context.Context, state *framework.CycleState, pod
 			for key, value := range config.Spec.NodeSelector.MatchLabels {
 				if old, ok := nodeSelector[key]; ok && old != value {
 					logger.Info("Label with mutiple value is not supported", "key", key, "value_1", old, "value_2", value, "config", config.Name)
-					framework.NewStatus(framework.Success, fmt.Sprintf("label with mutiple value is not supported %s=%s | %s in %s", key, old, value, config.Name))
+					framework.NewStatus(errorStatus, fmt.Sprintf("label with mutiple value is not supported %s=%s | %s in %s", key, old, value, config.Name))
 				}
 
 				nodeSelector[key] = value
