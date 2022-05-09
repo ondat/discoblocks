@@ -103,6 +103,7 @@ spec:
                 description: Policy contains the disk scale policies.
                 properties:
                   maximumCapacityOfDisk:
+                    default: 100Gi
                     description: MaximumCapacityOfDisks defines maximum capacity of
                       a disk.
                     pattern: ^(\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$
@@ -214,9 +215,7 @@ spec:
                 type: string
               pvcs:
                 additionalProperties:
-                  additionalProperties:
-                    type: string
-                  type: object
+                  type: string
                 description: PersistentVolumeClaims statuses
                 type: object
             type: object

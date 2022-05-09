@@ -99,24 +99,17 @@ func (r *PVCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	logger = logger.WithValues("dc_name", config.Name)
 
 	if pvc.DeletionTimestamp != nil {
-		if _, ok := config.Status.PersistentVolumeClaims[config.Name]; ok {
+		if _, ok := config.Status.PersistentVolumeClaims[pvc.Name]; ok {
 			logger.Info("Remove status")
-			delete(config.Status.PersistentVolumeClaims[config.Name], pvc.Name)
-		}
-
-		if len(config.Status.PersistentVolumeClaims[config.Name]) == 0 {
-			delete(config.Status.PersistentVolumeClaims, config.Name)
+			delete(config.Status.PersistentVolumeClaims, pvc.Name)
 		}
 	} else {
 		if config.Status.PersistentVolumeClaims == nil {
-			config.Status.PersistentVolumeClaims = map[string]map[string]corev1.PersistentVolumeClaimPhase{}
-		}
-		if config.Status.PersistentVolumeClaims[config.Name] == nil {
-			config.Status.PersistentVolumeClaims[config.Name] = map[string]corev1.PersistentVolumeClaimPhase{}
+			config.Status.PersistentVolumeClaims = map[string]corev1.PersistentVolumeClaimPhase{}
 		}
 
 		logger.Info("Add status", "phase", pvc.Status.Phase)
-		config.Status.PersistentVolumeClaims[config.Name][pvc.Name] = pvc.Status.Phase
+		config.Status.PersistentVolumeClaims[pvc.Name] = pvc.Status.Phase
 	}
 
 	// TODO update conditions
@@ -157,7 +150,9 @@ func (ef pvcEventFilter) Update(e event.UpdateEvent) bool {
 		return false
 	}
 
-	return newObj.DeletionTimestamp != nil || oldObj.Status.Phase != newObj.Status.Phase
+	return oldObj.DeletionTimestamp != nil ||
+		newObj.DeletionTimestamp != nil ||
+		oldObj.Status.Phase != newObj.Status.Phase
 }
 
 func (ef pvcEventFilter) Generic(_ event.GenericEvent) bool {

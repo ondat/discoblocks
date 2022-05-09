@@ -17,10 +17,11 @@ limitations under the License.
 package controllers
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -107,7 +108,31 @@ func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	case err != nil && apierrors.IsNotFound(err):
 		logger.Info("DiskConfig not found")
 
-		return ctrl.Result{}, nil
+		logger.Info("Fetch StrorageClasses...")
+
+		scList := storagev1.StorageClassList{}
+		if err = r.Client.List(ctx, &scList); err != nil {
+			return ctrl.Result{}, fmt.Errorf("unable to list StorageClasses: %w", err)
+		}
+
+		for i := range scList.Items {
+			if !controllerutil.ContainsFinalizer(&scList.Items[i], scFinalizer) {
+				continue
+			}
+
+			controllerutil.RemoveFinalizer(&scList.Items[i], scFinalizer)
+
+			//nolint:govet // logger is ok to shadowing
+			logger := logger.WithValues("sc_name", scList.Items[i].Name)
+			logger.Info("Remove StorageClass finalizer...", "finalizer", scFinalizer)
+
+			if err = r.Client.Update(ctx, &scList.Items[i]); err != nil {
+				logger.Info("Failed to remove finalizer of StorageClass", "error", err.Error())
+				return ctrl.Result{}, fmt.Errorf("unable to remove finalizer of StorageClass: %w", err)
+			}
+		}
+
+		return r.reconcileDelete(ctx, req.Name, &pvcList, logger.WithValues("mode", "delete"))
 	case err != nil:
 		return ctrl.Result{}, fmt.Errorf("unable to fetch DiskConfig: %w", err)
 	case config.DeletionTimestamp != nil:
@@ -119,29 +144,7 @@ func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			return ctrl.Result{}, fmt.Errorf("unable to update DiskConfig status: %w", err)
 		}
 
-		logger.Info("Fetch StrorageClasses...")
-
-		scList := storagev1.StorageClassList{}
-		if err = r.Client.List(ctx, &scList); err != nil {
-			return ctrl.Result{}, fmt.Errorf("unable to list StorageClasses: %w", err)
-		}
-
-		for i := range scList.Items {
-			if controllerutil.ContainsFinalizer(&scList.Items[i], scFinalizer) {
-				controllerutil.RemoveFinalizer(&scList.Items[i], scFinalizer)
-
-				//nolint:govet // logger is ok to shadowing
-				logger := logger.WithValues("sc_name", scList.Items[i].Name)
-				logger.Info("Remove StorageClass finalizer...", "finalizer", scFinalizer)
-
-				if err = r.Client.Update(ctx, &scList.Items[i]); err != nil {
-					logger.Info("Failed to remove finalizer of StorageClass", "error", err.Error())
-					return ctrl.Result{}, fmt.Errorf("unable to remove finalizer of StorageClass: %w", err)
-				}
-			}
-		}
-
-		return r.reconcileDelete(ctx, req.Name, &pvcList, logger.WithValues("mode", "delete"))
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
 	logger.Info("Fetch StorageClass...")
@@ -199,6 +202,12 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName s
 	wg := sync.WaitGroup{}
 
 	for i := range pvcs.Items {
+		if !controllerutil.ContainsFinalizer(&pvcs.Items[i], utils.RenderFinalizer(pvcs.Items[i].Labels["discoblocks"])) {
+			logger.Info("PVC not managed by", "config", pvcs.Items[i].Labels["discoblocks"])
+
+			continue
+		}
+
 		wg.Add(1)
 
 		i := i
@@ -356,22 +365,35 @@ func (ef diskConfigEventFilter) Create(_ event.CreateEvent) bool {
 }
 
 func (ef diskConfigEventFilter) Delete(_ event.DeleteEvent) bool {
-	return false
+	return true
 }
 
 func (ef diskConfigEventFilter) Update(e event.UpdateEvent) bool {
-	newObj, ok := e.ObjectNew.(*discoblocksondatiov1.DiskConfig)
-	if !ok {
-		ef.logger.Error(errors.New("unsupported type"), "Unable to cast new object")
-		return false
-	}
 	oldObj, ok := e.ObjectOld.(*discoblocksondatiov1.DiskConfig)
 	if !ok {
 		ef.logger.Error(errors.New("unsupported type"), "Unable to cast old object")
 		return false
 	}
 
-	return newObj.DeletionTimestamp != nil || !reflect.DeepEqual(oldObj.Spec, newObj.Spec)
+	newObj, ok := e.ObjectNew.(*discoblocksondatiov1.DiskConfig)
+	if !ok {
+		ef.logger.Error(errors.New("unsupported type"), "Unable to cast new object")
+		return false
+	}
+
+	newRawSpec, err := json.Marshal(newObj.Spec)
+	if err != nil {
+		ef.logger.Error(errors.New("invalid content"), "Unable to marshal new object")
+		return false
+	}
+
+	oldRawSpec, err := json.Marshal(oldObj.Spec)
+	if err != nil {
+		ef.logger.Error(errors.New("invalid content"), "Unable to marshal old object")
+		return false
+	}
+
+	return !bytes.Equal(newRawSpec, oldRawSpec)
 }
 
 func (ef diskConfigEventFilter) Generic(_ event.GenericEvent) bool {

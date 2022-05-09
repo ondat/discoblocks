@@ -72,6 +72,7 @@ type Policy struct {
 
 	// MaximumCapacityOfDisks defines maximum capacity of a disk.
 	//+kubebuilder:validation:Pattern:="^(\\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$"
+	//+kubebuilder:default:="100Gi"
 	//+kubebuilder:validation:Optional
 	MaximumCapacityOfDisk string `json:"maximumCapacityOfDisk,omitempty" yaml:"maximumCapacityOfDisk,omitempty"`
 
@@ -95,7 +96,7 @@ type DiskConfigStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty" yaml:"conditions,omitempty"`
 
 	// PersistentVolumeClaims statuses
-	PersistentVolumeClaims map[string]map[string]corev1.PersistentVolumeClaimPhase `json:"pvcs,omitempty" yaml:"pvcs,omitempty"`
+	PersistentVolumeClaims map[string]corev1.PersistentVolumeClaimPhase `json:"pvcs,omitempty" yaml:"pvcs,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=Ready;Running;Deleting

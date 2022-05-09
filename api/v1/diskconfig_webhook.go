@@ -84,6 +84,17 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 		return errors.New("invalid new capacity")
 	}
 
+	maxCapacity, err := resource.ParseQuantity(r.Spec.Policy.MaximumCapacityOfDisk)
+	if err != nil {
+		logger.Info("Max capacity is invalid")
+		return errors.New("invalid max capacity")
+	}
+
+	if maxCapacity.CmpInt64(0) != 0 && maxCapacity.Cmp(newCapacity) == -1 {
+		logger.Info("Capacity is more then max")
+		return errors.New("invalid new capacity, more then max")
+	}
+
 	if old != nil {
 		oldDC, ok := old.(*DiskConfig)
 		if !ok {
@@ -103,14 +114,14 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 		}
 
 		var oldCapacity resource.Quantity
-		oldCapacity, err = resource.ParseQuantity(r.Spec.Capacity)
+		oldCapacity, err = resource.ParseQuantity(oldDC.Spec.Capacity)
 		if err != nil {
 			err = errors.New("invalid old capacity")
 			logger.Error(err, "this should not happen")
 			return err
 		}
 
-		if oldCapacity.Cmp(newCapacity) == 1 {
+		if oldCapacity.CmpInt64(0) != 0 && oldCapacity.Cmp(newCapacity) == 1 {
 			logger.Info("Shrinking disk is not supported")
 			return errors.New("shrinking disk is not supported")
 		}

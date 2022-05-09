@@ -126,19 +126,9 @@ func (in *DiskConfigStatus) DeepCopyInto(out *DiskConfigStatus) {
 	}
 	if in.PersistentVolumeClaims != nil {
 		in, out := &in.PersistentVolumeClaims, &out.PersistentVolumeClaims
-		*out = make(map[string]map[string]corev1.PersistentVolumeClaimPhase, len(*in))
+		*out = make(map[string]corev1.PersistentVolumeClaimPhase, len(*in))
 		for key, val := range *in {
-			var outVal map[string]corev1.PersistentVolumeClaimPhase
-			if val == nil {
-				(*out)[key] = nil
-			} else {
-				in, out := &val, &outVal
-				*out = make(map[string]corev1.PersistentVolumeClaimPhase, len(*in))
-				for key, val := range *in {
-					(*out)[key] = val
-				}
-			}
-			(*out)[key] = outVal
+			(*out)[key] = val
 		}
 	}
 }
