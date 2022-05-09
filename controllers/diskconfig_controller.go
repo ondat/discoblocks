@@ -107,6 +107,18 @@ func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	case err != nil && apierrors.IsNotFound(err):
 		logger.Info("DiskConfig not found")
 
+		return ctrl.Result{}, nil
+	case err != nil:
+		return ctrl.Result{}, fmt.Errorf("unable to fetch DiskConfig: %w", err)
+	case config.DeletionTimestamp != nil:
+		logger.Info("DiskConfig delete in progress")
+
+		config.Status.Phase = discoblocksondatiov1.Deleting
+		if err = r.Client.Status().Update(ctx, &config); err != nil {
+			logger.Info("Unable to update DiskConfig status", "error", err.Error())
+			return ctrl.Result{}, fmt.Errorf("unable to update DiskConfig status: %w", err)
+		}
+
 		logger.Info("Fetch StrorageClasses...")
 
 		scList := storagev1.StorageClassList{}
@@ -130,18 +142,6 @@ func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 
 		return r.reconcileDelete(ctx, req.Name, &pvcList, logger.WithValues("mode", "delete"))
-	case err != nil:
-		return ctrl.Result{}, fmt.Errorf("unable to fetch DiskConfig: %w", err)
-	case config.DeletionTimestamp != nil:
-		logger.Info("DiskConfig delet in progress")
-
-		config.Status.Phase = discoblocksondatiov1.Deleting
-		if err = r.Client.Status().Update(ctx, &config); err != nil {
-			logger.Info("Unable to update DiskConfig status", "error", err.Error())
-			return ctrl.Result{}, fmt.Errorf("unable to update DiskConfig status: %w", err)
-		}
-
-		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
 	logger.Info("Fetch StorageClass...")
@@ -286,6 +286,12 @@ func (r *DiskConfigReconciler) reconcileUpdate(ctx context.Context, config *disc
 	wg := sync.WaitGroup{}
 
 	for i := range pvcs.Items {
+		if !controllerutil.ContainsFinalizer(&pvcs.Items[i], utils.RenderFinalizer(pvcs.Items[i].Labels["discoblocks"])) {
+			logger.Info("PVC not managed by", "config", pvcs.Items[i].Labels["discoblocks"])
+
+			continue
+		}
+
 		wg.Add(1)
 
 		i := i
@@ -341,19 +347,19 @@ func (r *DiskConfigReconciler) reconcileUpdate(ctx context.Context, config *disc
 	}
 }
 
-type eventFilter struct {
+type diskConfigEventFilter struct {
 	logger logr.Logger
 }
 
-func (ef eventFilter) Create(_ event.CreateEvent) bool {
+func (ef diskConfigEventFilter) Create(_ event.CreateEvent) bool {
 	return true
 }
 
-func (ef eventFilter) Delete(_ event.DeleteEvent) bool {
-	return true
+func (ef diskConfigEventFilter) Delete(_ event.DeleteEvent) bool {
+	return false
 }
 
-func (ef eventFilter) Update(e event.UpdateEvent) bool {
+func (ef diskConfigEventFilter) Update(e event.UpdateEvent) bool {
 	newObj, ok := e.ObjectNew.(*discoblocksondatiov1.DiskConfig)
 	if !ok {
 		ef.logger.Error(errors.New("unsupported type"), "Unable to cast new object")
@@ -365,10 +371,10 @@ func (ef eventFilter) Update(e event.UpdateEvent) bool {
 		return false
 	}
 
-	return !reflect.DeepEqual(oldObj.Spec, newObj.Spec)
+	return newObj.DeletionTimestamp != nil || !reflect.DeepEqual(oldObj.Spec, newObj.Spec)
 }
 
-func (ef eventFilter) Generic(_ event.GenericEvent) bool {
+func (ef diskConfigEventFilter) Generic(_ event.GenericEvent) bool {
 	return false
 }
 
@@ -376,7 +382,7 @@ func (ef eventFilter) Generic(_ event.GenericEvent) bool {
 func (r *DiskConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&discoblocksondatiov1.DiskConfig{}).
-		WithEventFilter(eventFilter{logger: mgr.GetLogger().WithName("DiskConfigReconciler")}).
+		WithEventFilter(diskConfigEventFilter{logger: mgr.GetLogger().WithName("DiskConfigReconciler")}).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 1,
 		}).

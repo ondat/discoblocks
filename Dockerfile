@@ -16,7 +16,6 @@ COPY controllers/ controllers/
 COPY mutators/ mutators/
 COPY pkg/ pkg/
 COPY schedulers/ schedulers/
-COPY watchers/ watchers/
 COPY controllers/ controllers/
 
 # Build

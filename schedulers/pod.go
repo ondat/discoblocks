@@ -27,7 +27,7 @@ func (s *podFilter) Name() string {
 
 // Filter does the filtering
 func (s *podFilter) Filter(ctx context.Context, state *framework.CycleState, pod *corev1.Pod, nodeInfo *framework.NodeInfo) *framework.Status {
-	logger := s.logger.WithName(pod.Name).WithValues("namespace", pod.Name, "node", nodeInfo.Node().Name)
+	logger := s.logger.WithValues("pod", pod.Name, "namespace", pod.Name, "node", nodeInfo.Node().Name)
 
 	errorStatus := framework.Success
 	if s.strict {

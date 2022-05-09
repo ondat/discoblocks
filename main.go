@@ -25,7 +25,7 @@ import (
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
-	"k8s.io/client-go/kubernetes"
+
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/klog/v2"
 
@@ -41,7 +41,6 @@ import (
 	"github.com/ondat/discoblocks/controllers"
 	"github.com/ondat/discoblocks/mutators"
 	"github.com/ondat/discoblocks/schedulers"
-	"github.com/ondat/discoblocks/watchers"
 
 	//+kubebuilder:scaffold:imports
 
@@ -119,6 +118,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&controllers.PVCReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "PVC")
+		os.Exit(1)
+	}
+
 	provisioners := strings.Split(strings.ReplaceAll(os.Getenv("SUPPORTED_CSI_DRIVERS"), " ", ""), ",")
 
 	discoblocksondatiov1.InitDiskConfigWebhookDeps(mgr.GetClient(), provisioners)
@@ -131,57 +138,37 @@ func main() {
 
 	mgr.GetWebhookServer().Register("/mutate-v1-pod", &webhook.Admission{Handler: &mutators.PodMutator{Client: mgr.GetClient()}})
 
-	defaultRestConfig := ctrl.GetConfigOrDie()
-	defaultKubeClient := kubernetes.NewForConfigOrDie(defaultRestConfig)
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	// TODO leader election is missing
-	watcherErrChan := watchers.NewPersistentVolumeClaimWatcher(mgr.GetClient(), *defaultKubeClient).Watch(ctx)
-	go func() {
-		setupLog.Error(<-watcherErrChan, "there was an error during watch")
-		cancel()
-		os.Exit(1)
-	}()
-
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
-		cancel()
 		os.Exit(1)
 	}
 	// TODO proper ready check would be nice
 	if err = mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
-		cancel()
 		os.Exit(1)
 	}
 
+	mgr.Elected()
 	strictScheduler := false
 	rawStrictScheduler := os.Getenv("SCHEDULER_STRICT_MODE")
 	if rawStrictScheduler != "" {
 		strictScheduler, err = strconv.ParseBool(rawStrictScheduler)
 		if err != nil {
 			setupLog.Error(err, "unable to parse SCHEDULER_STRICT_MODE")
-			cancel()
 			os.Exit(1)
 		}
 	}
 
-	// TODO leader election is missing
 	scheduler := schedulers.NewScheduler(mgr.GetClient(), strictScheduler)
-	schedulerErrChan := scheduler.Start(ctx)
+	schedulerErrChan := scheduler.Start(context.Background())
 	go func() {
 		setupLog.Error(<-schedulerErrChan, "there was an error in scheduler")
-		cancel()
 		os.Exit(1)
 	}()
 
 	setupLog.Info("starting manager")
 	if err = mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
-		cancel()
 		os.Exit(1)
 	}
-
-	cancel()
 }
