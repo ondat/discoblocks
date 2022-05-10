@@ -26,7 +26,7 @@ spec:
 
 var (
 	errRetain    = errors.New("only reclaimPolicy Retain is supported")
-	errBinding   = errors.New("only volumeBindingMode Immediate is supported")
+	errBinding   = errors.New("only volumeBindingMode WaitForFirstConsumer is supported")
 	errExpanding = errors.New("only allowVolumeExpansion true is supported")
 )
 
@@ -43,7 +43,9 @@ func (d driver) IsStorageClassValid(sc *storagev1.StorageClass) error {
 		return errRetain
 	}
 
-	if sc.VolumeBindingMode != nil && *sc.VolumeBindingMode != storagev1.VolumeBindingImmediate {
+	// TODO support Immediate requires per volume StorageClass because of topology,
+	// it avoids our scheduler, because PV are in place at scheduling time
+	if sc.VolumeBindingMode != nil && *sc.VolumeBindingMode != storagev1.VolumeBindingWaitForFirstConsumer {
 		return errBinding
 	}
 

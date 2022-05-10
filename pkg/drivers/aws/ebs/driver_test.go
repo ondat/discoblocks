@@ -14,8 +14,8 @@ func TestValidateStorageClass(t *testing.T) {
 
 	reclaimRetain := corev1.PersistentVolumeReclaimRetain
 	reclaimDelete := corev1.PersistentVolumeReclaimDelete
-	bindingImmediate := storagev1.VolumeBindingImmediate
 	bindingWait := storagev1.VolumeBindingWaitForFirstConsumer
+	bindingImmediate := storagev1.VolumeBindingImmediate
 	ok := true
 	nok := false
 
@@ -30,7 +30,7 @@ func TestValidateStorageClass(t *testing.T) {
 				},
 				Provisioner:          "ebs.csi.aws.com",
 				ReclaimPolicy:        &reclaimRetain,
-				VolumeBindingMode:    &bindingImmediate,
+				VolumeBindingMode:    &bindingWait,
 				AllowVolumeExpansion: &ok,
 			},
 		},
@@ -41,7 +41,7 @@ func TestValidateStorageClass(t *testing.T) {
 				},
 				Provisioner:       "ebs.csi.aws.com",
 				ReclaimPolicy:     &reclaimDelete,
-				VolumeBindingMode: &bindingImmediate,
+				VolumeBindingMode: &bindingWait,
 			},
 			expexted: errRetain,
 		},
@@ -52,7 +52,7 @@ func TestValidateStorageClass(t *testing.T) {
 				},
 				Provisioner:       "ebs.csi.aws.com",
 				ReclaimPolicy:     &reclaimRetain,
-				VolumeBindingMode: &bindingWait,
+				VolumeBindingMode: &bindingImmediate,
 			},
 			expexted: errBinding,
 		},
@@ -63,7 +63,7 @@ func TestValidateStorageClass(t *testing.T) {
 				},
 				Provisioner:       "ebs.csi.aws.com",
 				ReclaimPolicy:     &reclaimRetain,
-				VolumeBindingMode: &bindingImmediate,
+				VolumeBindingMode: &bindingWait,
 			},
 			expexted: errExpanding,
 		},
@@ -74,7 +74,7 @@ func TestValidateStorageClass(t *testing.T) {
 				},
 				Provisioner:          "ebs.csi.aws.com",
 				ReclaimPolicy:        &reclaimRetain,
-				VolumeBindingMode:    &bindingImmediate,
+				VolumeBindingMode:    &bindingWait,
 				AllowVolumeExpansion: &nok,
 			},
 			expexted: errExpanding,

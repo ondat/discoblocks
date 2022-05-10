@@ -47,7 +47,7 @@ parameters:
   type: gp3
 allowVolumeExpansion: true
 reclaimPolicy: Retain
-volumeBindingMode: Immediate
+volumeBindingMode: WaitForFirstConsumer
 EOF
 
 # Deploy cert manager
