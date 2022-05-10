@@ -17,12 +17,7 @@ metadata:
   name: %s
   namespace: %s
 spec:
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: %s
-  resources:
-    requests:
-      storage: 1Gi`
+  storageClassName: %s`
 
 var (
 	errRetain    = errors.New("only reclaimPolicy Retain is supported")

@@ -45,6 +45,17 @@ type DiskConfigSpec struct {
 	//+kubebuilder:validation:Optional
 	MountPointPattern string `json:"mountPointPattern,omitempty" yaml:"mountPointPattern,omitempty"`
 
+	// AccessModes contains the desired access modes the volume should have.
+	// More info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#access-modes-1
+	//+kubebuilder:default:={"ReadWriteOnce"}
+	//+kubebuilder:validation:Optional
+	AccessModes []corev1.PersistentVolumeAccessMode `json:"accessModes,omitempty" yaml:"accessModes,omitempty"`
+
+	// AvailabilityMode defines the desired number of instances.
+	//+kubebuilder:default:="Multiple"
+	//+kubebuilder:validation:Optional
+	AvailabilityMode AvailabilityMode `json:"availabilityMode,omitempty" yaml:"availabilityMode,omitempty"`
+
 	// NodeSelector is a selector which must be true for the disk to fit on a node. Selector which must match a node’s labels for the disk to be provisioned on that node.
 	//+kubebuilder:validation:Optional
 	NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty" yaml:"nodeSelector,omitempty"`
@@ -95,7 +106,7 @@ type DiskConfigStatus struct {
 	// Conditions is a list of status of all the disks.
 	Conditions []metav1.Condition `json:"conditions,omitempty" yaml:"conditions,omitempty"`
 
-	// PersistentVolumeClaims statuses
+	// PersistentVolumeClaims statuses.
 	PersistentVolumeClaims map[string]corev1.PersistentVolumeClaimPhase `json:"pvcs,omitempty" yaml:"pvcs,omitempty"`
 }
 
@@ -106,6 +117,14 @@ const (
 	Ready    Phase = "Ready"
 	Running  Phase = "Running"
 	Deleting Phase = "Deleting"
+)
+
+// +kubebuilder:validation:Enum=Singleton;Multiple
+type AvailabilityMode string
+
+const (
+	Singleton AvailabilityMode = "Singleton"
+	Multiple  AvailabilityMode = "Multiple"
 )
 
 //+kubebuilder:object:root=true

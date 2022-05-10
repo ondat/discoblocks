@@ -101,8 +101,12 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 			return errorMode(http.StatusNotFound, "Driver not found: "+sc.Provisioner, errors.New("driver not found: "+sc.Provisioner))
 		}
 
-		// TODO time.Now() blocks PVC reuse
-		pvcName, err := utils.RenderPVCName(time.Now().String(), config.CreationTimestamp.String(), config.Namespace+config.Name)
+		preFix := config.CreationTimestamp.String()
+		if config.Spec.AvailabilityMode != discoblocksondatiov1.Singleton {
+			preFix = time.Now().String()
+		}
+
+		pvcName, err := utils.RenderPVCName(preFix, config.Name, config.Namespace)
 		if err != nil {
 			logger.Error(err, "Unable to calculate hash")
 			return errorMode(http.StatusInternalServerError, "unable to calculate hash", err)
@@ -119,12 +123,24 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		pvc.Labels = map[string]string{
 			"discoblocks": config.Name,
 		}
-		pvc.Spec.Resources.Requests[corev1.ResourceStorage] = capacity
+		pvc.Spec.Resources = corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceStorage: capacity,
+			},
+		}
+		pvc.Spec.AccessModes = config.Spec.AccessModes
+		if len(pvc.Spec.AccessModes) == 0 {
+			pvc.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
+		}
 
 		logger.Info("Create PVC...")
 		if err = a.Client.Create(ctx, pvc); err != nil {
-			logger.Info("Failed to create PVC", "error", err.Error())
-			return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to create PVC: %w", err))
+			if !apierrors.IsAlreadyExists(err) {
+				logger.Info("Failed to create PVC", "error", err.Error())
+				return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to create PVC: %w", err))
+			}
+
+			logger.Info("PVC already exists")
 		}
 
 		volumes[pvcName] = utils.RenderMountPoint(config.Spec.MountPointPattern, pvc.Name, 0)
@@ -141,6 +157,8 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 	if len(volumes) == 0 {
 		return admission.Allowed("No sidecar injection")
 	}
+
+	pod.Spec.SchedulerName = "discoblocks-scheduler"
 
 	logger.Info("Attach sidecar...")
 
@@ -172,8 +190,6 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 			})
 		}
 	}
-
-	pod.Spec.SchedulerName = "discoblocks-scheduler"
 
 	marshaledPod, err := json.Marshal(pod)
 	if err != nil {

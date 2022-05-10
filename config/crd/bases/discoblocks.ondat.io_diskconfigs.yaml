@@ -35,6 +35,21 @@ spec:
           spec:
             description: DiskConfigSpec defines the desired state of DiskConfig
             properties:
+              accessModes:
+                default:
+                - ReadWriteOnce
+                description: 'AccessModes contains the desired access modes the volume
+                  should have. More info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#access-modes-1'
+                items:
+                  type: string
+                type: array
+              availabilityMode:
+                default: Multiple
+                description: AvailabilityMode defines the desired number of instances.
+                enum:
+                - Singleton
+                - Multiple
+                type: string
               capacity:
                 default: 1Gi
                 description: Capacity represents the desired capacity of the underlying
@@ -216,7 +231,7 @@ spec:
               pvcs:
                 additionalProperties:
                   type: string
-                description: PersistentVolumeClaims statuses
+                description: PersistentVolumeClaims statuses.
                 type: object
             type: object
         type: object
