@@ -3,6 +3,7 @@ package mutators
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -21,10 +22,11 @@ import (
 )
 
 // log is for logging in this package
-var podMutatorLog = logf.Log.WithName("pod-mutator")
+var podMutatorLog = logf.Log.WithName("PodMutator")
 
 type PodMutator struct {
 	Client  client.Client
+	strict  bool
 	decoder *admission.Decoder
 }
 
@@ -54,8 +56,15 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to fetch configs: %w", err))
 	}
 
-	volumes := map[string]string{}
+	errorMode := func(code int32, reason string, err error) admission.Response {
+		if a.strict {
+			return admission.Errored(code, err)
+		}
 
+		return admission.Allowed(reason)
+	}
+
+	volumes := map[string]string{}
 	for i := range diskConfigs.Items {
 		config := diskConfigs.Items[i]
 
@@ -70,7 +79,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		capacity, err := resource.ParseQuantity(config.Spec.Capacity)
 		if err != nil {
 			logger.Error(err, "Capacity is invalid")
-			return admission.Allowed("Capacity is invalid:" + config.Spec.Capacity)
+			return errorMode(http.StatusNotAcceptable, "Capacity is invalid:"+config.Spec.Capacity, err)
 		}
 
 		logger.Info("Fetch StorageClass...")
@@ -79,7 +88,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		if err = a.Client.Get(ctx, types.NamespacedName{Name: config.Spec.StorageClassName}, &sc); err != nil {
 			if apierrors.IsNotFound(err) {
 				logger.Info("StorageClass not found")
-				return admission.Allowed("StorageClass not found: " + config.Spec.StorageClassName)
+				return errorMode(http.StatusNotFound, "StorageClass not found: "+config.Spec.StorageClassName, err)
 			}
 			logger.Info("Unable to fetch StorageClass", "error", err.Error())
 			return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to fetch StorageClass: %w", err))
@@ -89,21 +98,21 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		driver := drivers.GetDriver(sc.Provisioner)
 		if driver == nil {
 			logger.Info("Driver not found")
-			return admission.Allowed("Driver not found: " + sc.Provisioner)
+			return errorMode(http.StatusNotFound, "Driver not found: "+sc.Provisioner, errors.New("driver not found: "+sc.Provisioner))
 		}
 
 		// TODO time.Now() blocks PVC reuse
 		pvcName, err := utils.RenderPVCName(time.Now().String(), config.CreationTimestamp.String(), config.Namespace+config.Name)
 		if err != nil {
 			logger.Error(err, "Unable to calculate hash")
-			return admission.Allowed("unable to calculate hash")
+			return errorMode(http.StatusInternalServerError, "unable to calculate hash", err)
 		}
 		logger = logger.WithValues("pvc_name", pvcName)
 
 		pvc, err := driver.GetPVCStub(pvcName, config.Namespace, config.Spec.StorageClassName)
 		if err != nil {
 			logger.Error(err, "Unable to init a PVC", "provisioner", sc.Provisioner)
-			return admission.Allowed("Unable to init a PVC")
+			return errorMode(http.StatusInternalServerError, "Unable to init a PVC", err)
 		}
 
 		pvc.Finalizers = []string{utils.RenderFinalizer(config.Name)}
@@ -112,7 +121,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		}
 		pvc.Spec.Resources.Requests[corev1.ResourceStorage] = capacity
 
-		logger.Info("Create PVCs...")
+		logger.Info("Create PVC...")
 		if err = a.Client.Create(ctx, pvc); err != nil {
 			logger.Info("Failed to create PVC", "error", err.Error())
 			return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to create PVC: %w", err))
@@ -129,54 +138,62 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		})
 	}
 
-	if len(volumes) != 0 {
-		logger.Info("Attach sidecar...")
-
-		volumes["dev"] = "/host/dev"
-		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
-			Name: "dev",
-			VolumeSource: corev1.VolumeSource{
-				HostPath: &corev1.HostPathVolumeSource{
-					Path: "/dev",
-				},
-			},
-		})
-
-		sideCar, err := utils.RenderSidecar()
-		if err != nil {
-			logger.Error(err, "Sidecar template invalid")
-			return admission.Allowed("Sidecar template invalid")
-		}
-
-		pod.Spec.Containers = append(pod.Spec.Containers, *sideCar)
-
-		logger.Info("Attach volume mounts...")
-
-		for i := range pod.Spec.Containers {
-			for name, mp := range volumes {
-				pod.Spec.Containers[i].VolumeMounts = append(pod.Spec.Containers[i].VolumeMounts, corev1.VolumeMount{
-					Name:      name,
-					MountPath: mp,
-				})
-			}
-		}
-
-		pod.Spec.SchedulerName = "discoblocks-scheduler"
-
-		marshaledPod, err := json.Marshal(pod)
-		if err != nil {
-			logger.Error(err, "Unable to marshal pod")
-			return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to marshal pod: %w", err))
-		}
-
-		return admission.PatchResponseFromRaw(req.Object.Raw, marshaledPod)
+	if len(volumes) == 0 {
+		return admission.Allowed("No sidecar injection")
 	}
 
-	return admission.Allowed("No sidecar injection")
+	logger.Info("Attach sidecar...")
+
+	volumes["dev"] = "/host/dev"
+	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+		Name: "dev",
+		VolumeSource: corev1.VolumeSource{
+			HostPath: &corev1.HostPathVolumeSource{
+				Path: "/dev",
+			},
+		},
+	})
+
+	sideCar, err := utils.RenderSidecar()
+	if err != nil {
+		logger.Error(err, "Sidecar template invalid")
+		return admission.Allowed("Sidecar template invalid")
+	}
+
+	pod.Spec.Containers = append(pod.Spec.Containers, *sideCar)
+
+	logger.Info("Attach volume mounts...")
+
+	for i := range pod.Spec.Containers {
+		for name, mp := range volumes {
+			pod.Spec.Containers[i].VolumeMounts = append(pod.Spec.Containers[i].VolumeMounts, corev1.VolumeMount{
+				Name:      name,
+				MountPath: mp,
+			})
+		}
+	}
+
+	pod.Spec.SchedulerName = "discoblocks-scheduler"
+
+	marshaledPod, err := json.Marshal(pod)
+	if err != nil {
+		logger.Error(err, "Unable to marshal pod")
+		return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to marshal pod: %w", err))
+	}
+
+	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledPod)
 }
 
 // InjectDecoder sets decoder
 func (a *PodMutator) InjectDecoder(d *admission.Decoder) error {
 	a.decoder = d
 	return nil
+}
+
+// NewPodMutator creates a new pod mutator
+func NewPodMutator(kubeClient client.Client, strict bool) *PodMutator {
+	return &PodMutator{
+		Client: kubeClient,
+		strict: strict,
+	}
 }

@@ -38,6 +38,8 @@ spec:
             value: "ebs.csi.aws.com"
           - name: SCHEDULER_STRICT_MODE
             value: "true"
+          - name: MUTATOR_STRICT_MODE
++            value: "true"
         securityContext:
           allowPrivilegeEscalation: false
         volumeMounts:

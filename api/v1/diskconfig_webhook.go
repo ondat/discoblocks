@@ -34,7 +34,7 @@ import (
 )
 
 // log is for logging in this package
-var diskConfigLog = logf.Log.WithName("diskconfig-resource")
+var diskConfigLog = logf.Log.WithName("DiskConfigWebhook")
 
 // SetupWebhookWithManager sets up the webhook with the Manager.
 func (r *DiskConfig) SetupWebhookWithManager(mgr ctrl.Manager) error {

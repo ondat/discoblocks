@@ -53,7 +53,7 @@ const (
 
 var (
 	scheme   = runtime.NewScheme()
-	setupLog = ctrl.Log.WithName("setup")
+	setupLog = ctrl.Log.WithName("Setup")
 )
 
 //+kubebuilder:rbac:groups=discoblocks.ondat.io,resources=diskconfigs,verbs=get;list;watch;create;update;delete
@@ -136,7 +136,14 @@ func main() {
 	}
 	//+kubebuilder:scaffold:builder
 
-	mgr.GetWebhookServer().Register("/mutate-v1-pod", &webhook.Admission{Handler: &mutators.PodMutator{Client: mgr.GetClient()}})
+	strictMutator, err := parseBoolEnv("MUTATOR_STRICT_MODE")
+	if err != nil {
+		setupLog.Error(err, "unable to parse MUTATOR_STRICT_MODE")
+		os.Exit(1)
+	}
+
+	podMutator := mutators.NewPodMutator(mgr.GetClient(), strictMutator)
+	mgr.GetWebhookServer().Register("/mutate-v1-pod", &webhook.Admission{Handler: podMutator})
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
@@ -148,15 +155,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	mgr.Elected()
-	strictScheduler := false
-	rawStrictScheduler := os.Getenv("SCHEDULER_STRICT_MODE")
-	if rawStrictScheduler != "" {
-		strictScheduler, err = strconv.ParseBool(rawStrictScheduler)
-		if err != nil {
-			setupLog.Error(err, "unable to parse SCHEDULER_STRICT_MODE")
-			os.Exit(1)
-		}
+	strictScheduler, err := parseBoolEnv("SCHEDULER_STRICT_MODE")
+	if err != nil {
+		setupLog.Error(err, "unable to parse SCHEDULER_STRICT_MODE")
+		os.Exit(1)
 	}
 
 	scheduler := schedulers.NewScheduler(mgr.GetClient(), strictScheduler)
@@ -171,4 +173,13 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+func parseBoolEnv(key string) (bool, error) {
+	raw := os.Getenv(key)
+	if raw != "" {
+		return strconv.ParseBool(raw)
+	}
+
+	return false, nil
 }

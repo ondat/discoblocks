@@ -11,7 +11,7 @@ import (
 )
 
 // log is for logging in this package
-var schedulerLog = logf.Log.WithName("scheduler")
+var schedulerLog = logf.Log.WithName("Scheduler")
 
 // Scheduler HTTP service for schedulers
 type Scheduler struct {
@@ -33,7 +33,7 @@ func (s *Scheduler) Start(ctx context.Context) <-chan error {
 		podFilterPlugin := podFilter{
 			Client: s.Client,
 			strict: s.strict,
-			logger: s.logger.WithName("pod"),
+			logger: s.logger.WithName("Pod"),
 		}
 
 		command := scheduler.NewSchedulerCommand(scheduler.WithPlugin(podFilterPlugin.Name(), podFilterPlugin.Factory))
