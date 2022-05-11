@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -12,8 +11,6 @@ import (
 func TestValidateStorageClass(t *testing.T) {
 	t.Parallel()
 
-	reclaimRetain := corev1.PersistentVolumeReclaimRetain
-	reclaimDelete := corev1.PersistentVolumeReclaimDelete
 	bindingWait := storagev1.VolumeBindingWaitForFirstConsumer
 	bindingImmediate := storagev1.VolumeBindingImmediate
 	ok := true
@@ -29,21 +26,9 @@ func TestValidateStorageClass(t *testing.T) {
 					Name: "storageclass",
 				},
 				Provisioner:          "ebs.csi.aws.com",
-				ReclaimPolicy:        &reclaimRetain,
 				VolumeBindingMode:    &bindingWait,
 				AllowVolumeExpansion: &ok,
 			},
-		},
-		"wrong recailm": {
-			storageClass: storagev1.StorageClass{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "storageclass",
-				},
-				Provisioner:       "ebs.csi.aws.com",
-				ReclaimPolicy:     &reclaimDelete,
-				VolumeBindingMode: &bindingWait,
-			},
-			expexted: errRetain,
 		},
 		"wrong binding": {
 			storageClass: storagev1.StorageClass{
@@ -51,7 +36,6 @@ func TestValidateStorageClass(t *testing.T) {
 					Name: "storageclass",
 				},
 				Provisioner:       "ebs.csi.aws.com",
-				ReclaimPolicy:     &reclaimRetain,
 				VolumeBindingMode: &bindingImmediate,
 			},
 			expexted: errBinding,
@@ -62,7 +46,6 @@ func TestValidateStorageClass(t *testing.T) {
 					Name: "storageclass",
 				},
 				Provisioner:       "ebs.csi.aws.com",
-				ReclaimPolicy:     &reclaimRetain,
 				VolumeBindingMode: &bindingWait,
 			},
 			expexted: errExpanding,
@@ -73,7 +56,6 @@ func TestValidateStorageClass(t *testing.T) {
 					Name: "storageclass",
 				},
 				Provisioner:          "ebs.csi.aws.com",
-				ReclaimPolicy:        &reclaimRetain,
 				VolumeBindingMode:    &bindingWait,
 				AllowVolumeExpansion: &nok,
 			},

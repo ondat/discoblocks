@@ -20,7 +20,6 @@ spec:
   storageClassName: %s`
 
 var (
-	errRetain    = errors.New("only reclaimPolicy Retain is supported")
 	errBinding   = errors.New("only volumeBindingMode WaitForFirstConsumer is supported")
 	errExpanding = errors.New("only allowVolumeExpansion true is supported")
 )
@@ -34,10 +33,6 @@ type driver struct {
 
 // IsStorageClassValid validates StorageClass
 func (d driver) IsStorageClassValid(sc *storagev1.StorageClass) error {
-	if sc.ReclaimPolicy == nil || *sc.ReclaimPolicy != corev1.PersistentVolumeReclaimRetain {
-		return errRetain
-	}
-
 	// TODO support Immediate requires per volume StorageClass because of topology,
 	// it avoids our scheduler, because PV are in place at scheduling time
 	if sc.VolumeBindingMode != nil && *sc.VolumeBindingMode != storagev1.VolumeBindingWaitForFirstConsumer {
@@ -61,4 +56,12 @@ func (d driver) GetPVCStub(name, namespace, storageClassName string) (*corev1.Pe
 	}
 
 	return &pvc, nil
+}
+
+// GetCSIDriverPodLabels returns the driver pod labels
+func (d driver) GetCSIDriverPodLabels() (string, map[string]string) {
+	return "kube-system", map[string]string{
+		"app.kubernetes.io/component": "ebs-csi-controller",
+		"app.kubernetes.io/name":      "aws-ebs-csi-driver",
+	}
 }

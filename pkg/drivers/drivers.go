@@ -21,4 +21,5 @@ func SetDriver(name string, driver Driver) {
 type Driver interface {
 	IsStorageClassValid(*storagev1.StorageClass) error
 	GetPVCStub(string, string, string) (*corev1.PersistentVolumeClaim, error)
+	GetCSIDriverPodLabels() (string, map[string]string)
 }

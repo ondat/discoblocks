@@ -171,8 +171,6 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 		return fmt.Errorf("invalid StorageClass: %w", err)
 	}
 
-	// TODO validate CSI deployment
-
 	return nil
 }
 
