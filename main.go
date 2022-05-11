@@ -63,6 +63,8 @@ var (
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims/finalizers,verbs=update
 //+kubebuilder:rbac:groups="storage.k8s.io",resources=storageclasses,verbs=get;update
 //+kubebuilder:rbac:groups="storage.k8s.io",resources=storageclasses/finalizers,verbs=update
+//+kubebuilder:rbac:groups="",resources=services,verbs=get;create;update;delete
+//+kubebuilder:rbac:groups="",resources=services/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 
 // indirect rbac

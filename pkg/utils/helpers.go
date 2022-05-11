@@ -10,12 +10,34 @@ import (
 
 const defaultMountPattern = "/media/discoblocks/%s-%d"
 
-// TODO use pause container instead
+// TODO on this way on case of multiple discoblocks on a pod,
+// all service would capture all disks leads to redundant data
+const metricsServiceTemplate = `kind: Service
+apiVersion: v1
+metadata:
+  name: %s
+  namespace: %s
+  annotations:
+    prometheus.io/path: "/metrics"
+    prometheus.io/scrape: "true"
+    prometheus.io/port:   "9100"
+spec:
+  ports:
+  - name: node-exporter
+    protocol: TCP
+    port: 9100
+    targetPort: 9100`
+
+// TODO limit filesystem reports to discoblocks (ignored-mount-points)
 const sidecarTeamplate = `name: discoblocks-sidecar
-image: alpine:3.15.4
+image: bitnami/node-exporter:1.3.1
+ports:
+- containerPort: 9100
+  protocol: TCP
 command:
-- sleep
-- infinity
+- /opt/bitnami/node-exporter/bin/node_exporter
+- --collector.disable-defaults
+- --collector.filesystem
 securityContext:
   allowPrivilegeEscalation: true
   privileged: true`
@@ -55,6 +77,16 @@ func RenderPVCName(elems ...string) (string, error) {
 	}
 
 	return builder.String(), nil
+}
+
+// RenderMetricsService returns the metrics service
+func RenderMetricsService(name, namespace string) (*corev1.Service, error) {
+	service := corev1.Service{}
+	if err := yaml.Unmarshal([]byte(fmt.Sprintf(metricsServiceTemplate, name, namespace)), &service); err != nil {
+		return nil, err
+	}
+
+	return &service, nil
 }
 
 // RenderSidecar returns the sidecar

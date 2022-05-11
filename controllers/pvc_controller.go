@@ -77,10 +77,6 @@ func (r *PVCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, nil
 	case err != nil:
 		return ctrl.Result{}, fmt.Errorf("unable to fetch PVC: %w", err)
-	case !controllerutil.ContainsFinalizer(&pvc, utils.RenderFinalizer(pvc.Labels["discoblocks"])):
-		logger.Info("PVC not managed by", "config", pvc.Labels["discoblocks"])
-
-		return ctrl.Result{}, nil
 	}
 
 	logger.Info("Fetch DiskConfig...")
@@ -130,8 +126,14 @@ type pvcEventFilter struct {
 	logger logr.Logger
 }
 
-func (ef pvcEventFilter) Create(_ event.CreateEvent) bool {
-	return true
+func (ef pvcEventFilter) Create(e event.CreateEvent) bool {
+	newObj, ok := e.Object.(*corev1.PersistentVolumeClaim)
+	if !ok {
+		ef.logger.Error(errors.New("unsupported type"), "Unable to cast new object")
+		return false
+	}
+
+	return controllerutil.ContainsFinalizer(newObj, utils.RenderFinalizer(newObj.Labels["discoblocks"]))
 }
 
 func (ef pvcEventFilter) Delete(_ event.DeleteEvent) bool {
@@ -144,6 +146,11 @@ func (ef pvcEventFilter) Update(e event.UpdateEvent) bool {
 		ef.logger.Error(errors.New("unsupported type"), "Unable to cast new object")
 		return false
 	}
+
+	if !controllerutil.ContainsFinalizer(newObj, utils.RenderFinalizer(newObj.Labels["discoblocks"])) {
+		return false
+	}
+
 	oldObj, ok := e.ObjectOld.(*corev1.PersistentVolumeClaim)
 	if !ok {
 		ef.logger.Error(errors.New("unsupported type"), "Unable to cast old object")

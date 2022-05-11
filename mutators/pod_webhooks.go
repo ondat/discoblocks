@@ -72,6 +72,11 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 			continue
 		}
 
+		if pod.Labels == nil {
+			pod.Labels = map[string]string{}
+		}
+		pod.Labels["discoblocks/metrics"] = config.Name
+
 		//nolint:govet // logger is ok to shadowing
 		logger := logger.WithValues("name", config.Name, "sc_name", config.Spec.StorageClassName)
 		logger.Info("Attach volume to workload...")

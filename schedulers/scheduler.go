@@ -43,6 +43,7 @@ func (s *Scheduler) Start(ctx context.Context) <-chan error {
 		if err := command.ExecuteContext(ctx); err != nil {
 			s.logger.Error(err, "Scheduler plugin crashed")
 			errChan <- err
+			return
 		}
 	}()
 

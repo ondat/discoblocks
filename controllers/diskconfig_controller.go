@@ -132,11 +132,13 @@ func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			}
 		}
 
-		return r.reconcileDelete(ctx, req.Name, &pvcList, logger.WithValues("mode", "delete"))
+		return r.reconcileDelete(ctx, req.Name, req.Namespace, &pvcList, logger.WithValues("mode", "delete"))
 	case err != nil:
 		return ctrl.Result{}, fmt.Errorf("unable to fetch DiskConfig: %w", err)
 	case config.DeletionTimestamp != nil:
 		logger.Info("DiskConfig delete in progress")
+
+		logger.Info("Updating phase to Deleting...")
 
 		config.Status.Phase = discoblocksondatiov1.Deleting
 		if err = r.Client.Status().Update(ctx, &config); err != nil {
@@ -147,13 +149,15 @@ func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
-	logger.Info("Fetch StorageClass...")
+	logger.Info("Updating phase to Running...")
 
 	config.Status.Phase = discoblocksondatiov1.Running
 	if err = r.Client.Status().Update(ctx, &config); err != nil {
 		logger.Info("Unable to update DiskConfig status", "error", err.Error())
 		return ctrl.Result{}, fmt.Errorf("unable to update DiskConfig status: %w", err)
 	}
+
+	logger.Info("Fetch StorageClass...")
 
 	sc := storagev1.StorageClass{}
 	if err = r.Get(ctx, types.NamespacedName{Name: config.Spec.StorageClassName}, &sc); err != nil {
@@ -182,6 +186,8 @@ func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	var result ctrl.Result
 	result, err = r.reconcileUpdate(ctx, &config, &sc, &pvcList, logger.WithValues("mode", "update"))
 	if err == nil {
+		logger.Info("Updating phase to Ready...")
+
 		config.Status.Phase = discoblocksondatiov1.Ready
 		if err = r.Client.Status().Update(ctx, &config); err != nil {
 			logger.Info("Unable to update DiskConfig status", "error", err.Error())
@@ -192,10 +198,32 @@ func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	return result, err
 }
 
-func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName string, pvcs *corev1.PersistentVolumeClaimList, logger logr.Logger) (ctrl.Result, error) {
-	logger.Info("Update PVCs...")
+func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, configNamespace string, pvcs *corev1.PersistentVolumeClaimList, logger logr.Logger) (ctrl.Result, error) {
+	finalizer := utils.RenderFinalizer(configName)
 
-	pvcFinalizer := utils.RenderFinalizer(configName)
+	logger.Info("Delete Service...")
+
+	service := corev1.Service{}
+	if err := r.Get(ctx, types.NamespacedName{Name: configName, Namespace: configNamespace}, &service); err != nil && !apierrors.IsNotFound(err) {
+		logger.Info("Unable to fetch Service", "error", err.Error())
+		return ctrl.Result{}, fmt.Errorf("unable to fetch Service: %w", err)
+	} else if err == nil {
+		if controllerutil.ContainsFinalizer(&service, finalizer) {
+			controllerutil.RemoveFinalizer(&service, finalizer)
+
+			if err = r.Client.Update(ctx, &service); err != nil {
+				logger.Info("Unable to update Service", "error", err.Error())
+				return ctrl.Result{}, fmt.Errorf("unable to update Service: %w", err)
+			}
+		}
+
+		if err = r.Client.Delete(ctx, &service); err != nil {
+			logger.Info("Unable to delete Service", "error", err.Error())
+			return ctrl.Result{}, fmt.Errorf("unable to delete Service: %w", err)
+		}
+	}
+
+	logger.Info("Update PVCs...")
 
 	sem := utils.CreateSemaphore(concurrency, time.Nanosecond)
 	errChan := make(chan error)
@@ -218,19 +246,21 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName s
 			if err != nil {
 				logger.Info("Context deadline")
 				errChan <- fmt.Errorf("context deadline %s->%s", pvcs.Items[i].GetNamespace(), pvcs.Items[i].GetName())
+				return
 			}
 			defer unlock()
 
-			if controllerutil.ContainsFinalizer(&pvcs.Items[i], pvcFinalizer) {
-				controllerutil.RemoveFinalizer(&pvcs.Items[i], pvcFinalizer)
+			if controllerutil.ContainsFinalizer(&pvcs.Items[i], finalizer) {
+				controllerutil.RemoveFinalizer(&pvcs.Items[i], finalizer)
 
 				//nolint:govet // logger is ok to shadowing
 				logger := logger.WithValues("pvc_name", pvcs.Items[i].Name, "pvc_namespace", pvcs.Items[i].Namespace)
-				logger.Info("Update PVC finalizer...", "finalizer", pvcFinalizer)
+				logger.Info("Update PVC finalizer...", "finalizer", finalizer)
 
 				if err = r.Update(ctx, &pvcs.Items[i]); err != nil {
 					logger.Info("Failed to remove finalizer of PVC", "error", err.Error())
 					errChan <- fmt.Errorf("unable to remove finalizer of PVC %s->%s: %w", pvcs.Items[i].Namespace, pvcs.Items[i].Name, err)
+					return
 				}
 			}
 		}()
@@ -284,6 +314,30 @@ func (r *DiskConfigReconciler) reconcileUpdate(ctx context.Context, config *disc
 		return ctrl.Result{RequeueAfter: time.Minute}, fmt.Errorf("invalid StorageClass: %w", err)
 	}
 
+	service, err := utils.RenderMetricsService(config.Name, config.Namespace)
+	if err != nil {
+		logger.Error(err, "Failed to render Service")
+		return ctrl.Result{}, fmt.Errorf("unable to render Service: %w", err)
+	}
+
+	controllerutil.AddFinalizer(service, utils.RenderFinalizer(config.Name))
+	service.Labels = map[string]string{
+		"discoblocks": config.Name,
+	}
+	service.Spec.Selector = map[string]string{
+		"discoblocks/metrics": config.Name,
+	}
+
+	logger.Info("Create Service...")
+	if err = r.Client.Create(ctx, service); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			logger.Info("Failed to create Service", "error", err.Error())
+			return ctrl.Result{}, fmt.Errorf("unable to create Service: %w", err)
+		}
+
+		logger.Info("Service already exists")
+	}
+
 	if len(pvcs.Items) == 0 {
 		return ctrl.Result{}, nil
 	}
@@ -293,6 +347,7 @@ func (r *DiskConfigReconciler) reconcileUpdate(ctx context.Context, config *disc
 	sem := utils.CreateSemaphore(concurrency, time.Nanosecond)
 	errChan := make(chan error)
 	wg := sync.WaitGroup{}
+	wg.Add(1)
 
 	for i := range pvcs.Items {
 		if !controllerutil.ContainsFinalizer(&pvcs.Items[i], utils.RenderFinalizer(pvcs.Items[i].Labels["discoblocks"])) {
@@ -311,6 +366,7 @@ func (r *DiskConfigReconciler) reconcileUpdate(ctx context.Context, config *disc
 			if err != nil {
 				logger.Info("Context deadline")
 				errChan <- fmt.Errorf("context deadline %s->%s", pvcs.Items[i].GetNamespace(), pvcs.Items[i].GetName())
+				return
 			}
 			defer unlock()
 
@@ -331,6 +387,7 @@ func (r *DiskConfigReconciler) reconcileUpdate(ctx context.Context, config *disc
 			if err = r.Update(ctx, &pvcs.Items[i]); err != nil {
 				logger.Info("Failed to update PVC", "error", err.Error())
 				errChan <- fmt.Errorf("unable to update PVC %s->%s: %w", pvcs.Items[i].Namespace, pvcs.Items[i].Name, err)
+				return
 			}
 		}()
 	}

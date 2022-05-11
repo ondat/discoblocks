@@ -41,6 +41,21 @@ rules:
   verbs:
   - update
 - apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - services/finalizers
+  verbs:
+  - update
+- apiGroups:
   - apps
   resources:
   - replicasets
