@@ -7,7 +7,7 @@ import (
 )
 
 func TestGetSidecarStub(t *testing.T) {
-	_, err := RenderSidecar()
+	_, err := RenderMetricsSidecar()
 
 	assert.Nil(t, err, "invalid sidecar template")
 }

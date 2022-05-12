@@ -44,6 +44,8 @@ func (s *podFilter) Filter(ctx context.Context, state *framework.CycleState, pod
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
+	logger.Info("Fetch DiskConfigs...")
+
 	diskConfigs := discoblocksondatiov1.DiskConfigList{}
 	if err := s.Client.List(ctx, &diskConfigs, &client.ListOptions{
 		Namespace: pod.Namespace,

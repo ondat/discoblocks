@@ -47,7 +47,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
-	logger.Info("Fetch configs...")
+	logger.Info("Fetch DiskConfigs...")
 
 	diskConfigs := discoblocksondatiov1.DiskConfigList{}
 	if err := a.Client.List(ctx, &diskConfigs, &client.ListOptions{
@@ -165,9 +165,22 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 	pod.Spec.SchedulerName = "discoblocks-scheduler"
 
-	logger.Info("Attach sidecar...")
+	logger.Info("Attach sidecars...")
 
-	volumes["dev"] = "/host/dev"
+	metricsSideCar, err := utils.RenderMetricsSidecar()
+	if err != nil {
+		logger.Error(err, "Metrics sidecar template invalid")
+		return admission.Allowed("Metrics sidecar template invalid")
+	}
+	pod.Spec.Containers = append(pod.Spec.Containers, *metricsSideCar)
+
+	managerSideCar, err := utils.RenderManagerSidecar()
+	if err != nil {
+		logger.Error(err, "Manager sidecar template invalid")
+		return admission.Allowed("Manager sidecar template invalid")
+	}
+	pod.Spec.Containers = append(pod.Spec.Containers, *managerSideCar)
+
 	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 		Name: "dev",
 		VolumeSource: corev1.VolumeSource{
@@ -176,14 +189,6 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 			},
 		},
 	})
-
-	sideCar, err := utils.RenderSidecar()
-	if err != nil {
-		logger.Error(err, "Sidecar template invalid")
-		return admission.Allowed("Sidecar template invalid")
-	}
-
-	pod.Spec.Containers = append(pod.Spec.Containers, *sideCar)
 
 	logger.Info("Attach volume mounts...")
 

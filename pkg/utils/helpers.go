@@ -29,7 +29,7 @@ spec:
     targetPort: 9100`
 
 // TODO limit filesystem reports to discoblocks (ignored-mount-points)
-const sidecarTeamplate = `name: discoblocks-sidecar
+const metricsTeamplate = `name: discoblocks-metrics
 image: bitnami/node-exporter:1.3.1
 ports:
 - containerPort: 9100
@@ -37,7 +37,17 @@ ports:
 command:
 - /opt/bitnami/node-exporter/bin/node_exporter
 - --collector.disable-defaults
-- --collector.filesystem
+- --collector.filesystem`
+
+// TODO maybe a config map for templates makes sense
+const sidecarTeamplate = `name: discoblocks-manager
+image: alpine:3.15.4
+command:
+- sleep
+- infinity
+volumeMounts:
+- name: dev
+  mountPath: /host/dev
 securityContext:
   allowPrivilegeEscalation: true
   privileged: true`
@@ -89,8 +99,18 @@ func RenderMetricsService(name, namespace string) (*corev1.Service, error) {
 	return &service, nil
 }
 
-// RenderSidecar returns the sidecar
-func RenderSidecar() (*corev1.Container, error) {
+// RenderMetricsSidecar returns the metrics sidecar
+func RenderMetricsSidecar() (*corev1.Container, error) {
+	sidecar := corev1.Container{}
+	if err := yaml.Unmarshal([]byte(metricsTeamplate), &sidecar); err != nil {
+		return nil, err
+	}
+
+	return &sidecar, nil
+}
+
+// RenderManagerSidecar returns the manager sidecar
+func RenderManagerSidecar() (*corev1.Container, error) {
 	sidecar := corev1.Container{}
 	if err := yaml.Unmarshal([]byte(sidecarTeamplate), &sidecar); err != nil {
 		return nil, err
