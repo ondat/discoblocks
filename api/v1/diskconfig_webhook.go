@@ -116,6 +116,7 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 		}
 
 		if oldDC.Spec.MountPointPattern != r.Spec.MountPointPattern {
+			// TODO count PVCs by label, if 0 mode is ok to change
 			logger.Info("Mount pattern of StorageClass is immutable")
 			return errors.New("mount point pattern is immutable field")
 		}

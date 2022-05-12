@@ -63,9 +63,10 @@ var (
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims/finalizers,verbs=update
 //+kubebuilder:rbac:groups="storage.k8s.io",resources=storageclasses,verbs=get;update
 //+kubebuilder:rbac:groups="storage.k8s.io",resources=storageclasses/finalizers,verbs=update
-//+kubebuilder:rbac:groups="",resources=services,verbs=get;create;update;delete
+//+kubebuilder:rbac:groups="",resources=services,verbs=create;update;delete
 //+kubebuilder:rbac:groups="",resources=services/finalizers,verbs=update
-//+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
+//+kubebuilder:rbac:groups="",resources=endpoints,verbs=list;watch
+//+kubebuilder:rbac:groups="",resources=pod,verbs=get
 
 // indirect rbac
 //+kubebuilder:rbac:groups="",resources=namespaces;services;pods;persistentvolumes;replicationcontrollers,verbs=list;watch
@@ -120,7 +121,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controllers.PVCReconciler{
+	// TODO close not handled
+	if _, err = (&controllers.PVCReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {

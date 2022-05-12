@@ -138,10 +138,6 @@ spec:
                     minimum: 50
                     type: integer
                 type: object
-              prometheusEndpoint:
-                description: PrometheusEndpoint defines the metrics endpoint of disk
-                  capacity.
-                type: string
               storageClassName:
                 description: StorageClassName is the of the StorageClass required
                   by the config.

@@ -8,20 +8,19 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - namespaces
-  - persistentvolumes
-  - pods
-  - replicationcontrollers
-  - services
+  - endpoints
   verbs:
   - list
   - watch
 - apiGroups:
   - ""
   resources:
-  - nodes
+  - namespaces
+  - persistentvolumes
+  - pods
+  - replicationcontrollers
+  - services
   verbs:
-  - get
   - list
   - watch
 - apiGroups:
@@ -43,11 +42,16 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - pod
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resources:
   - services
   verbs:
   - create
   - delete
-  - get
   - update
 - apiGroups:
   - ""

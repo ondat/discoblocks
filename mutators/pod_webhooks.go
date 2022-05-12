@@ -174,26 +174,27 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 	}
 	pod.Spec.Containers = append(pod.Spec.Containers, *metricsSideCar)
 
-	managerSideCar, err := utils.RenderManagerSidecar()
-	if err != nil {
-		logger.Error(err, "Manager sidecar template invalid")
-		return admission.Allowed("Manager sidecar template invalid")
-	}
-	pod.Spec.Containers = append(pod.Spec.Containers, *managerSideCar)
-
-	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
-		Name: "dev",
-		VolumeSource: corev1.VolumeSource{
-			HostPath: &corev1.HostPathVolumeSource{
-				Path: "/dev",
-			},
-		},
-	})
+	// TODO manager sidecar is needed to mount disks on the fly
+	// managerSideCar, err := utils.RenderManagerSidecar()
+	// if err != nil {
+	// 	logger.Error(err, "Manager sidecar template invalid")
+	// 	return admission.Allowed("Manager sidecar template invalid")
+	// }
+	// pod.Spec.Containers = append(pod.Spec.Containers, *managerSideCar)
+	// pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+	// 	Name: "dev",
+	// 	VolumeSource: corev1.VolumeSource{
+	// 		HostPath: &corev1.HostPathVolumeSource{
+	// 			Path: "/dev",
+	// 		},
+	// 	},
+	// })
 
 	logger.Info("Attach volume mounts...")
 
 	for i := range pod.Spec.Containers {
 		for name, mp := range volumes {
+			// TODO what if mount point collision, need to validate
 			pod.Spec.Containers[i].VolumeMounts = append(pod.Spec.Containers[i].VolumeMounts, corev1.VolumeMount{
 				Name:      name,
 				MountPath: mp,

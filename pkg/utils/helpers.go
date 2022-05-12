@@ -2,8 +2,11 @@ package utils
 
 import (
 	"fmt"
+	"math/big"
 	"strings"
 
+	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/common/expfmt"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/yaml"
 )
@@ -129,4 +132,30 @@ func IsContainsAll(a, b map[string]string) bool {
 	}
 
 	return match == len(b)
+}
+
+// ParsePrometheusMetric parses Prometheus metrisc details
+func ParsePrometheusMetric(metric string) (map[string]*dto.MetricFamily, error) {
+	var parser expfmt.TextParser
+
+	okErr := expfmt.ParseError{Line: 1, Msg: "unexpected end of input stream"}
+
+	mf, err := parser.TextToMetricFamilies(strings.NewReader(metric))
+	if err == okErr && mf != nil {
+		err = nil
+	}
+
+	return mf, err
+}
+
+// ParsePrometheusMetricValue parses Prometheus metrisc value
+func ParsePrometheusMetricValue(metric string) (float64, error) {
+	parts := strings.Split(metric, " ")
+
+	const floatBase = 10
+
+	flt, _, err := big.ParseFloat(parts[len(parts)-1], floatBase, 0, big.ToNearestEven)
+	f, _ := flt.Float64()
+
+	return f, err
 }

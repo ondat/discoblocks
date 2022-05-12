@@ -13,6 +13,6 @@ spec:
   podSelector:
     discoblocks: diskconfig-sample
   policy:
-    upscaleTriggerPercentage: 90
-    maximumCapacityOfDisk: 4Gi
+    upscaleTriggerPercentage: 50
+    maximumCapacityOfDisk: 2Gi
     maximumNumberOfDisks: 3

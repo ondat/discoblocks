@@ -64,10 +64,6 @@ type DiskConfigSpec struct {
 	//+kubebuilder:validation:Required
 	PodSelector map[string]string `json:"podSelector" yaml:"podSelector"`
 
-	// PrometheusEndpoint defines the metrics endpoint of disk capacity.
-	//+kubebuilder:validation:Optional
-	PrometheusEndpoint string `json:"prometheusEndpoint,omitempty" yaml:"prometheusEndpoint,omitempty"`
-
 	// Policy contains the disk scale policies.
 	Policy Policy `json:"policy,omitempty" yaml:"policy,omitempty"`
 }
