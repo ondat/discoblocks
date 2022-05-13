@@ -156,7 +156,7 @@ func (r *PVCReconciler) MonitorVolumes() {
 	discoblocks := map[types.NamespacedName][]string{}
 	metrics := map[types.NamespacedName][]string{}
 	for i := range endpoints.Items {
-		// TODO detect not managed, finalizer like PVC
+		// TODO detect not managed, finalizer like PVC if possible
 
 		for _, ss := range endpoints.Items[i].Subsets {
 			for _, ip := range ss.Addresses {
@@ -291,6 +291,11 @@ func (r *PVCReconciler) MonitorVolumes() {
 					continue
 				}
 				logger = logger.WithValues("pvc_name", pvc.Name)
+
+				if !controllerutil.ContainsFinalizer(&pvc, utils.RenderFinalizer(config.Name)) {
+					logger.Info("PVC not managed by", "config", pvc.Labels["discoblocks"])
+					continue
+				}
 
 				// TODO abort if resizing by condition or pvc.Status.ResizeStatus
 

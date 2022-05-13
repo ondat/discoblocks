@@ -204,7 +204,6 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 	for i := range pvcList.Items {
 		if !controllerutil.ContainsFinalizer(&pvcList.Items[i], utils.RenderFinalizer(pvcList.Items[i].Labels["discoblocks"])) {
 			logger.Info("PVC not managed by", "config", pvcList.Items[i].Labels["discoblocks"])
-
 			continue
 		}
 

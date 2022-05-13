@@ -148,7 +148,15 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 			logger.Info("PVC already exists")
 		}
 
-		volumes[pvcName] = utils.RenderMountPoint(config.Spec.MountPointPattern, pvc.Name, 0)
+		mountpoint := utils.RenderMountPoint(config.Spec.MountPointPattern, pvc.Name, 0)
+		for name, mp := range volumes {
+			if mp == mountpoint {
+				logger.Info("Mount point already added", "exists", name, "actual", pvcName, "mountpoint", sc.Provisioner)
+				return errorMode(http.StatusInternalServerError, "Unable to init a PVC", err)
+			}
+		}
+		volumes[pvcName] = mountpoint
+
 		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 			Name: pvcName,
 			VolumeSource: corev1.VolumeSource{
@@ -194,7 +202,6 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 	for i := range pod.Spec.Containers {
 		for name, mp := range volumes {
-			// TODO what if mount point collision, need to validate
 			pod.Spec.Containers[i].VolumeMounts = append(pod.Spec.Containers[i].VolumeMounts, corev1.VolumeMount{
 				Name:      name,
 				MountPath: mp,
