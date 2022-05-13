@@ -6,7 +6,16 @@
   <a href="https://github.com/ondat/discoblocks/actions/workflows/e2e-on-pr.yml">
     <img alt="end-2-end build" src="https://github.com/ondat/discoblocks/actions/workflows/e2e-on-pr.yml/badge.svg"/>
   </a>
+  <a href="https://github.com/ondat/discoblocks/actions/workflows/scorecards-analysis.yml">
+    <img alt="scorecards supply-chain security" src="https://github.com/ondat/discoblocks/actions/workflows/scorecards-analysis.yml/badge.svg"/>
+  </a>
 </p>
+
+The [end-2-end build](https://github.com/ondat/discoblocks/blob/main/.github/workflows/e2e-on-pr.yml) includes:
+- [gosec scanning](https://github.com/ondat/discoblocks/blob/main/.github/workflows/_gosecscan.yml)
+- [golang-ci linting](https://github.com/ondat/discoblocks/blob/main/.github/workflows/_gocilint.yml)
+- [Docker image build](https://github.com/ondat/discoblocks/blob/main/.github/workflows/_docker-build.yml)
+- [Trivy vulnerability scanning](https://github.com/ondat/discoblocks/blob/main/.github/workflows/_trivy.yml)
 
 -----
 
