@@ -7,6 +7,9 @@
     <img alt="end-2-end build" src="https://github.com/ondat/discoblocks/actions/workflows/e2e-on-pr.yml/badge.svg"/>
   </a>
   <a href="https://github.com/ondat/discoblocks/actions/workflows/scorecards-analysis.yml">
+    <img alt="scorecards supply-chain security" src="https://goreportcard.com/badge/github.com/ondat/discoblocks"/>
+  </a>
+  <a href="https://goreportcard.com/report/github.com/ondat/discoblocks">
     <img alt="scorecards supply-chain security" src="https://github.com/ondat/discoblocks/actions/workflows/scorecards-analysis.yml/badge.svg"/>
   </a>
   <a href="https://bestpractices.coreinfrastructure.org/en/projects/6047">
