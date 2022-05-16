@@ -60,6 +60,10 @@ At the current stage, Discoblocks is leveraging the available hyperscaler CSI (C
 
 **Note:** that an application could be using Discoblocks to get persistent storage but this option would not be safe for production as there will not be any data platform management to address high availability, replication, fencing, encryption, ...
 
+## Demo from our core Developer
+
+https://user-images.githubusercontent.com/55788733/168624989-c9b1d469-d3e5-40e7-8858-c9ff4a5b5428.mp4
+
 ## About the name 
 Some call storage snorage because they believe it is boring... but what we could have fun and dance with the block devices!
 
