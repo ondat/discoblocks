@@ -24,6 +24,14 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o manager main.go
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
 FROM gcr.io/distroless/static:nonroot
+
+LABEL org.opencontainers.image.title "Discoblocks" 
+LABEL org.opencontainers.image.vendor "Discoblocks.io" 
+LABEL org.opencontainers.image.licenses "Apache-2.0 License" 
+LABEL org.opencontainers.image.source "https://github.com/ondat/discoblocks" 
+LABEL org.opencontainers.image.description "Discoblocks is an open-source declarative disk configuration system for Kubernetes helping to automate CRUD (Create, Read, Update, Delete) operations for cloud disk device resources attached to Kubernetes cluster nodes." 
+LABEL org.opencontainers.image.documentation "https://github.com/ondat/discoblocks/wiki" 
+
 WORKDIR /
 COPY --from=builder /workspace/manager .
 USER 65532:65532
