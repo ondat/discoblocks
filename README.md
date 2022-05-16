@@ -1,7 +1,7 @@
 
-<!-- <p align="center">
-    <img src="" >
-</p> -->
+<p align="center">
+    <img src="https://github.com/ondat/discoblocks/blob/main/assets/DiscoBlocks-2.png" width="25%" height="25%" >
+</p>
 <p align="center">
   <a href="https://github.com/ondat/discoblocks/actions/workflows/e2e-on-pr.yml">
     <img alt="end-2-end build" src="https://github.com/ondat/discoblocks/actions/workflows/e2e-on-pr.yml/badge.svg"/>
