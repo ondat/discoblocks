@@ -11,6 +11,9 @@ linters-settings:
       - opinionated
       - performance
       - style
+    disabled-checks:
+      - unnamedResult
+      - hugeParam
   govet:
     check-shadowing: true
   nolintlint:

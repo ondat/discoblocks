@@ -33,8 +33,18 @@ spec:
         - --leader-elect
         image: controller:latest
         name: manager
+        env:
+          - name: SUPPORTED_CSI_DRIVERS
+            value: "ebs.csi.aws.com"
+          - name: SCHEDULER_STRICT_MODE
+            value: "true"
+          - name: MUTATOR_STRICT_MODE
+            value: "true"
         securityContext:
           allowPrivilegeEscalation: false
+        volumeMounts:
+          - name: config-volume
+            mountPath: /etc/kubernetes/discoblocks-scheduler
         livenessProbe:
           httpGet:
             path: /healthz
@@ -47,8 +57,6 @@ spec:
             port: 8081
           initialDelaySeconds: 5
           periodSeconds: 10
-        # TODO(user): Configure the resources accordingly based on the project requirements.
-        # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
         resources:
           limits:
             cpu: 500m
@@ -58,3 +66,7 @@ spec:
             memory: 64Mi
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10
+      volumes:
+        - name: config-volume
+          configMap:
+            name: discoblocks-scheduler

@@ -6,28 +6,117 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
-  - discoblocks.ondat.io.discoblocks.ondat.io
+  - ""
   resources:
-  - discconfigs
+  - endpoints
+  verbs:
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  - persistentvolumes
+  - pods
+  - replicationcontrollers
+  - services
+  verbs:
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  verbs:
+  - create
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - pod
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - create
+  - delete
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - services/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - apps
+  resources:
+  - replicasets
+  - statefulsets
+  verbs:
+  - list
+  - watch
+- apiGroups:
+  - discoblocks.ondat.io
+  resources:
+  - diskconfigs
   verbs:
   - create
   - delete
   - get
   - list
-  - patch
   - update
   - watch
 - apiGroups:
-  - discoblocks.ondat.io.discoblocks.ondat.io
+  - discoblocks.ondat.io
   resources:
-  - discconfigs/finalizers
+  - diskconfigs/finalizers
   verbs:
   - update
 - apiGroups:
-  - discoblocks.ondat.io.discoblocks.ondat.io
+  - discoblocks.ondat.io
   resources:
-  - discconfigs/status
+  - diskconfigs/status
+  verbs:
+  - update
+- apiGroups:
+  - policy
+  resources:
+  - poddisruptionbudgets
+  verbs:
+  - list
+  - watch
+- apiGroups:
+  - storage.k8s.io
+  resources:
+  - csidrivers
+  - csinodes
+  - csistoragecapacities
+  - storageclasses
+  verbs:
+  - list
+  - watch
+- apiGroups:
+  - storage.k8s.io
+  resources:
+  - storageclasses
   verbs:
   - get
-  - patch
+  - update
+- apiGroups:
+  - storage.k8s.io
+  resources:
+  - storageclasses/finalizers
+  verbs:
   - update
