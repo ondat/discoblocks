@@ -34,17 +34,18 @@ require (
 	github.com/go-logr/logr v1.2.0
 	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/gomega v1.19.0
+	github.com/prometheus/client_model v0.2.0
+	github.com/prometheus/common v0.28.0
 	github.com/stretchr/testify v1.7.0
 	golang.org/x/net v0.0.0-20220225172249-27dd8689420f
 	k8s.io/api v0.23.6
 	k8s.io/apimachinery v0.23.6
 	k8s.io/client-go v0.23.6
 	k8s.io/klog/v2 v2.60.1
+	k8s.io/kubernetes v1.23.6
 	sigs.k8s.io/controller-runtime v0.11.2
 	sigs.k8s.io/yaml v1.3.0
 )
-
-require k8s.io/kubernetes v1.23.6
 
 require (
 	cloud.google.com/go v0.81.0 // indirect
@@ -102,8 +103,6 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_golang v1.11.0 // indirect
-	github.com/prometheus/client_model v0.2.0 // indirect
-	github.com/prometheus/common v0.28.0 // indirect
 	github.com/prometheus/procfs v0.6.0 // indirect
 	github.com/spf13/cobra v1.2.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
@@ -124,7 +123,7 @@ require (
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
 	go.uber.org/zap v1.19.1 // indirect
-	golang.org/x/crypto v0.0.0-20210817164053-32db794688a5 // indirect
+	golang.org/x/crypto v0.0.0-20220315160706-3147a52a75dd // indirect
 	golang.org/x/oauth2 v0.0.0-20210819190943-2bc19b11175f // indirect
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c // indirect
 	golang.org/x/sys v0.0.0-20211216021012-1d35b9e2eb4e // indirect
