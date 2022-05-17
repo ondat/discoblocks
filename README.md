@@ -12,8 +12,8 @@
   <a href="https://github.com/ondat/discoblocks/actions/workflows/scorecards-analysis.yml">
     <img alt="scorecards supply-chain security" src="https://github.com/ondat/discoblocks/actions/workflows/scorecards-analysis.yml/badge.svg"/>
   </a>
-  <a href="https://bestpractices.coreinfrastructure.org/en/projects/6047">
-    <img alt="OpenSSF Best Practices" src="https://bestpractices.coreinfrastructure.org/badge_static/85"/>
+  <a href="https://bestpractices.coreinfrastructure.org/projects/6047">
+    <img src="https://bestpractices.coreinfrastructure.org/projects/6047/badge">
   </a>
 </p>
 
@@ -55,8 +55,8 @@ At the current stage, Discoblocks is leveraging the available hyperscaler CSI (C
   - podSelector
   - upscale policy 
 - provision the relevant disk device using the CSI (like EBS on AWS) when the workload deployment will happen
-- monitore the volume(s)
-- reszie automatically the volume based on the upscale policy
+- monitor the volume(s)
+- resize automatically the volume based on the upscale policy
 
 **Note:** that an application could be using Discoblocks to get persistent storage but this option would not be safe for production as there will not be any data platform management to address high availability, replication, fencing, encryption, ...
 
