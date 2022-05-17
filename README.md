@@ -12,8 +12,8 @@
   <a href="https://github.com/ondat/discoblocks/actions/workflows/scorecards-analysis.yml">
     <img alt="scorecards supply-chain security" src="https://github.com/ondat/discoblocks/actions/workflows/scorecards-analysis.yml/badge.svg"/>
   </a>
-  <a href="https://bestpractices.coreinfrastructure.org/en/projects/6047">
-    <img alt="OpenSSF Best Practices" src="https://bestpractices.coreinfrastructure.org/badge_static/85"/>
+  <a href="https://bestpractices.coreinfrastructure.org/projects/6047">
+    <img src="https://bestpractices.coreinfrastructure.org/projects/6047/badge">
   </a>
 </p>
 
