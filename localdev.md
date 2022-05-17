@@ -36,7 +36,7 @@ cat > .aws-ebs-csi-driver-trust-policy.json <<EOF
 EOF
 aws iam create-role --role-name $REPOSITORY-EKS_EBS_CSI_DriverRole-$now --assume-role-policy-document file://'.aws-ebs-csi-driver-trust-policy.json'
 aws iam attach-role-policy --policy-arn arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy --role-name $REPOSITORY-EKS_EBS_CSI_DriverRole-$now
-aws eks create-addon --cluster-name $REPOSITORY-test --addon-name aws-ebs-csi-driver --service-account-role-arn arn:aws:iam::[AWS_ACCOUNT_ID]:role/$REPOSITORY-EKS_EBS_CSI_DriverRole-$now
+aws eks create-addon --cluster-name $REPOSITORY-test --addon-name aws-ebs-csi-driver --service-account-role-arn arn:aws:iam::$AWS_ACCOUNT_ID:role/$REPOSITORY-EKS_EBS_CSI_DriverRole-$now
 cat <<EOF | kubectl apply -f -
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
