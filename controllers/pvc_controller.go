@@ -241,6 +241,11 @@ func (r *PVCReconciler) MonitorVolumes() {
 				diskConfigCache[diskConfigName] = config
 			}
 
+			if config.Spec.Policy.Pause {
+				logger.Info("Autoscaling paused")
+				continue
+			}
+
 			for _, metric := range metrics[podName] {
 				mf, err := utils.ParsePrometheusMetric(metric)
 				if err != nil {

@@ -130,6 +130,10 @@ spec:
                     maximum: 1000
                     minimum: 1
                     type: integer
+                  pause:
+                    default: false
+                    description: Pause disables autoscaling of disks.
+                    type: boolean
                   upscaleTriggerPercentage:
                     default: 80
                     description: UpscaleTriggerPercentage defines the disk fullness

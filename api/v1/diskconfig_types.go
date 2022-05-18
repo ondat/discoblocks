@@ -89,6 +89,11 @@ type Policy struct {
 	//+kubebuilder:validation:Maximum:=1000
 	//+kubebuilder:validation:Optional
 	MaximumNumberOfDisks uint8 `json:"maximumNumberOfDisks,omitempty" yaml:"maximumNumberOfDisks,omitempty"`
+
+	// Pause disables autoscaling of disks.
+	//+kubebuilder:default:=false
+	//+kubebuilder:validation:Optional
+	Pause bool `json:"pause,omitempty" yaml:"pause,omitempty"`
 }
 
 // DiskConfigStatus defines the observed state of DiskConfig
