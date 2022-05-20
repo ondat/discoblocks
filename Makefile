@@ -11,6 +11,8 @@ else
 GOBIN=$(shell go env GOBIN)
 endif
 
+LDF_FLAGS = -X github.com/ondat/discoblocks/pkg/drivers.DriversDir=$(PWD)/drivers
+
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # This is a requirement for 'setup-envtest.sh' in the test target.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
@@ -56,18 +58,18 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 .PHONY: test
-test: manifests generate fmt vet envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test ./... -coverprofile cover.out
+test: manifests generate fmt vet build-drivers envtest ## Run tests.
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test -ldflags "$(LDF_FLAGS)" ./... -coverprofile cover.out
 
 ##@ Build
 
 .PHONY: build
 build: generate fmt vet ## Build manager binary.
-	go build -o bin/manager main.go
+	go build -ldflags "$(LDF_FLAGS)" -o bin/manager main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
-	go run ./main.go
+	go run -ldflags "$(LDF_FLAGS)" ./main.go
 
 .PHONY: docker-build
 docker-build: test ## Build docker image with the manager.
@@ -76,6 +78,10 @@ docker-build: test ## Build docker image with the manager.
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
+
+.PHONY: build-drivers
+build-drivers: ## Build CSI driver WASIs
+	docker run -v $(PWD)/drivers:/go/src tinygo/tinygo:0.23.0 bash -c "(cd /go/src/ebs.csi.aws.com ; go mod tidy && tinygo build -o main.wasm -target wasi --no-debug main.go)"
 
 ##@ Deployment
 

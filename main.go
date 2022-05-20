@@ -41,10 +41,7 @@ import (
 	"github.com/ondat/discoblocks/controllers"
 	"github.com/ondat/discoblocks/mutators"
 	"github.com/ondat/discoblocks/schedulers"
-
 	//+kubebuilder:scaffold:imports
-
-	_ "github.com/ondat/discoblocks/pkg/drivers/aws/ebs"
 )
 
 const (

@@ -37,6 +37,7 @@ require (
 	github.com/prometheus/client_model v0.2.0
 	github.com/prometheus/common v0.28.0
 	github.com/stretchr/testify v1.7.1
+	github.com/wasmerio/wasmer-go v1.0.4
 	golang.org/x/net v0.0.0-20220225172249-27dd8689420f
 	k8s.io/api v0.23.6
 	k8s.io/apimachinery v0.23.6
