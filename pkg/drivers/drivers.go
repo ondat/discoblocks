@@ -96,7 +96,7 @@ func (d *Driver) IsStorageClassValid(sc *storagev1.StorageClass) (bool, error) {
 	}
 
 	resp, err := strconv.ParseBool(string(wasiEnv.ReadStdout()))
-	if errOut != "" {
+	if err != nil {
 		return false, fmt.Errorf("unable to parse output: %w", err)
 	}
 
@@ -131,7 +131,7 @@ func (d *Driver) GetPVCStub(name, namespace, storageClassName string) (*corev1.P
 
 	pvc := corev1.PersistentVolumeClaim{}
 	err = json.Unmarshal(wasiEnv.ReadStdout(), &pvc)
-	if errOut != "" {
+	if err != nil {
 		return nil, fmt.Errorf("unable to parse output: %w", err)
 	}
 
@@ -179,7 +179,7 @@ func (d *Driver) GetCSIDriverDetails() (string, map[string]string, error) {
 
 	labels := map[string]string{}
 	err = json.Unmarshal(wasiEnv.ReadStdout(), &labels)
-	if errOut != "" {
+	if err != nil {
 		return "", nil, fmt.Errorf("unable to parse output GetCSIDriverPodLabels: %w", err)
 	}
 

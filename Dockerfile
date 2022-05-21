@@ -27,8 +27,7 @@ COPY drivers/ /go/src
 
 RUN cd /go/src/ebs.csi.aws.com ; go mod tidy && tinygo build -o main.wasm -target wasi --no-debug main.go
 
-# Use distroless as minimal base image to package the manager binary
-# Refer to https://github.com/GoogleContainerTools/distroless for more details
+# Use UBI as minimal base image to package the manager binary
 FROM redhat/ubi8-micro:8.6
 
 LABEL org.opencontainers.image.title "Discoblocks" 
