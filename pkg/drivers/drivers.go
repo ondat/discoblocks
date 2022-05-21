@@ -72,7 +72,7 @@ func (d *Driver) IsStorageClassValid(sc *storagev1.StorageClass) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("unable to parse StorageClass: %w", err)
 	}
-	println(string(rawSc))
+
 	wasiEnv, instance, err := d.init(map[string]string{
 		"STORAGE_CLASS_JSON": string(rawSc),
 	})
