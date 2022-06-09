@@ -30,7 +30,7 @@ func init() {
 		driverPath := fmt.Sprintf("%s/%s/main.wasm", DriversDir, file.Name())
 
 		if _, err := os.Stat(driverPath); err != nil {
-			log.Printf("unable to found main.wasm for %s: %s", file.Name(), err.Error())
+			log.Printf("unable to find main.wasm for %s: %s", file.Name(), err.Error())
 			continue
 		}
 
