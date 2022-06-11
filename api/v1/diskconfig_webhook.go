@@ -167,7 +167,11 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 		return errors.New("driver not found")
 	}
 
-	if err = driver.IsStorageClassValid(&sc); err != nil {
+	valid, err := driver.IsStorageClassValid(&sc)
+	if err != nil {
+		logger.Error(err, "Failed to call driver")
+		return fmt.Errorf("failed to call driver: %w", err)
+	} else if !valid {
 		logger.Info("Invalid StorageClass", "error", err.Error())
 		return fmt.Errorf("invalid StorageClass: %w", err)
 	}

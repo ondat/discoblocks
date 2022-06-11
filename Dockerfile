@@ -16,14 +16,19 @@ COPY controllers/ controllers/
 COPY mutators/ mutators/
 COPY pkg/ pkg/
 COPY schedulers/ schedulers/
-COPY controllers/ controllers/
 
 # Build
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o manager main.go
+RUN GOOS=linux GOARCH=amd64 go build -a -o manager main.go
 
-# Use distroless as minimal base image to package the manager binary
-# Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM gcr.io/distroless/static@sha256:2556293984c5738fc75208cce52cf0a4762c709cf38e4bf8def65a61992da0ad
+# Build CSI drivers
+FROM tinygo/tinygo:0.23.0 as drivers
+
+COPY drivers/ /go/src
+
+RUN cd /go/src/ebs.csi.aws.com ; go mod tidy && tinygo build -o main.wasm -target wasi --no-debug main.go
+
+# Use UBI as minimal base image to package the manager binary
+FROM redhat/ubi8-micro:8.6
 
 LABEL org.opencontainers.image.title "Discoblocks" 
 LABEL org.opencontainers.image.vendor "Discoblocks.io" 
@@ -34,6 +39,10 @@ LABEL org.opencontainers.image.documentation "https://github.com/ondat/discobloc
 
 WORKDIR /
 COPY --from=builder /workspace/manager .
+COPY --from=drivers /go/src /drivers
+COPY --from=builder /go/pkg/mod/github.com/wasmerio/wasmer-go@v1.0.4/wasmer/packaged/lib/linux-amd64/libwasmer.so /lib64
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+
 USER 65532:65532
 
 ENTRYPOINT ["/manager"]

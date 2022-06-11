@@ -20,4 +20,4 @@ jobs:
       - name: run gosec scan
         uses: securego/gosec@a64cde55a4499d951566243783f204e94b9197ed
         with: 
-          args: "-exclude-generated ./..." 
+          args: "-exclude-dir=drivers -exclude-generated ./..." 
