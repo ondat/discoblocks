@@ -21,14 +21,14 @@ COPY schedulers/ schedulers/
 RUN GOOS=linux GOARCH=amd64 go build -a -o manager main.go
 
 # Build CSI drivers
-FROM tinygo/tinygo:0.23.0 as drivers
+FROM tinygo/tinygo@sha256:65dc1c3e54f88aabe1efe073c3aadb1393593a56355a6ac03df5f18e6c3855dd as drivers
 
 COPY drivers/ /go/src
 
 RUN cd /go/src/ebs.csi.aws.com ; go mod tidy && tinygo build -o main.wasm -target wasi --no-debug main.go
 
 # Use UBI as minimal base image to package the manager binary
-FROM redhat/ubi8-micro:8.6
+FROM redhat/ubi8-micro@sha256:4f6f8db9a6dc949d9779a57c43954b251957bd4d019a37edbbde8ed5228fe90a
 
 LABEL org.opencontainers.image.title "Discoblocks" 
 LABEL org.opencontainers.image.vendor "Discoblocks.io" 
