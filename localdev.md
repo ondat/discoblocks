@@ -57,7 +57,7 @@ make deploy-cert-manager
 IMG=$REPOSITORY/discoblocks:latest make manifests generate deploy
 
 # Create sample application
-kubectl apply -f config/samples/discoblocks.ondat.io_v1_diskconfig.yaml
+kubectl apply -f config/samples/discoblocks.ondat.io_v1_diskconfig-ebs.csi.aws.com.yaml
 kubectl apply -f config/samples/pod.yaml
 
 # Fetch logs
