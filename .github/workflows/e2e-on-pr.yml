@@ -34,3 +34,6 @@ jobs:
     uses: ./.github/workflows/_trivy.yml
     needs: image-build
 
+  kuttl:
+    uses: ./.github/workflows/_kuttl.yml
+    needs: image-build

@@ -11,6 +11,8 @@ testbin/*
 
 # Test binary, build with `go test -c`
 *.test
+kind-logs-*
+kubeconfig
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out

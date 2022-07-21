@@ -1,0 +1,18 @@
+apiVersion: discoblocks.ondat.io/v1
+kind: DiskConfig
+metadata:
+  name: diskconfig-sample-storageos
+  namespace: default
+spec:
+  storageClassName: storageos
+  capacity: 1Gi
+  mountPointPattern: /media/discoblocks/sample-%d
+  nodeSelector:
+    matchLabels:
+      kubernetes.io/os: linux 
+  podSelector:
+    app: nginx
+  policy:
+    upscaleTriggerPercentage: 50
+    maximumCapacityOfDisk: 2Gi
+    maximumNumberOfDisks: 3
