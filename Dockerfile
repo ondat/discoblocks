@@ -25,6 +25,7 @@ FROM tinygo/tinygo@sha256:65dc1c3e54f88aabe1efe073c3aadb1393593a56355a6ac03df5f1
 
 COPY drivers/ /go/src
 
+RUN cd /go/src/csi.storageos.com ; go mod tidy && tinygo build -o main.wasm -target wasi --no-debug main.go
 RUN cd /go/src/ebs.csi.aws.com ; go mod tidy && tinygo build -o main.wasm -target wasi --no-debug main.go
 
 # Use UBI as minimal base image to package the manager binary

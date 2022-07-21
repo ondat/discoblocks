@@ -2,5 +2,6 @@ go 1.18
 
 use (
 	.
+	./drivers/csi.storageos.com
 	./drivers/ebs.csi.aws.com
 )

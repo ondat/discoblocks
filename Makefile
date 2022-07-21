@@ -81,6 +81,7 @@ docker-push: ## Push docker image with the manager.
 
 .PHONY: build-drivers
 build-drivers: ## Build CSI driver WASIs
+	docker run -v $(PWD)/drivers:/go/src -w /go/src/csi.storageos.com tinygo/tinygo:0.23.0 bash -c "go mod tidy && tinygo build -o main.wasm -target wasi --no-debug main.go"
 	docker run -v $(PWD)/drivers:/go/src -w /go/src/ebs.csi.aws.com tinygo/tinygo:0.23.0 bash -c "go mod tidy && tinygo build -o main.wasm -target wasi --no-debug main.go"
 
 ##@ Deployment

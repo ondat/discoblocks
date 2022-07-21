@@ -1,0 +1,18 @@
+apiVersion: discoblocks.ondat.io/v1
+kind: DiskConfig
+metadata:
+  name: diskconfig-sample-aws-ebs
+  namespace: default
+spec:
+  storageClassName: ebs-sc
+  capacity: 1Gi
+  mountPointPattern: /media/discoblocks/sample-%d
+  nodeSelector:
+    matchLabels:
+      kubernetes.io/os: linux 
+  podSelector:
+    discoblocks: diskconfig-sample
+  policy:
+    upscaleTriggerPercentage: 50
+    maximumCapacityOfDisk: 2Gi
+    maximumNumberOfDisks: 3

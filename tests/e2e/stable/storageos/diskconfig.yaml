@@ -1,17 +1,17 @@
 apiVersion: discoblocks.ondat.io/v1
 kind: DiskConfig
 metadata:
-  name: diskconfig-sample
+  name: diskconfig-sample-storageos
   namespace: default
 spec:
-  storageClassName: ebs-sc
+  storageClassName: storageos
   capacity: 1Gi
   mountPointPattern: /media/discoblocks/sample-%d
   nodeSelector:
     matchLabels:
       kubernetes.io/os: linux 
   podSelector:
-    discoblocks: diskconfig-sample
+    app: nginx
   policy:
     upscaleTriggerPercentage: 50
     maximumCapacityOfDisk: 2Gi

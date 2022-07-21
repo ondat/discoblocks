@@ -73,3 +73,14 @@ vars:
     kind: Service
     version: v1
     name: webhook-service
+patches:
+  - patch: |-
+      - op: replace
+        path: "/spec/template/spec/containers/1/env/0"
+        value:
+          name: SUPPORTED_CSI_DRIVERS
+          value: "ebs.csi.aws.com"
+    target:
+      kind: Deployment
+      namespace: system
+      name: controller-manager
