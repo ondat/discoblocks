@@ -1,5 +1,5 @@
 apiVersion: kuttl.dev/v1beta1
 kind: TestStep
 commands:
-  - command: sh -c 'cat 03-assert.tpl.yaml | sed -e "s/#PVC_NAME#/$(kubectl get pvc -l discoblocks=diskconfig-sample-storageos --no-headers -o custom-columns=":metadata.name")/" -e "s/#PV_NAME#/$(kubectl get pvc -l discoblocks=diskconfig-sample-storageos --no-headers -o custom-columns=":spec.volumeName")/" -e "s/#POD_NAME#/$(kubectl get po -l discoblocks=diskconfig-sample-storageos --no-headers -o custom-columns=":metadata.name")/" > workload/00-assert.yaml'
+  - command: sh -c 'cat 03-assert.tpl.yaml | sed -e "s/#PVC_NAME#/$(kubectl get pvc -l discoblocks=diskconfig-sample-storageos --no-headers -o custom-columns=":metadata.name")/" -e "s/#PV_NAME#/$(kubectl get pvc -l discoblocks=diskconfig-sample-storageos --no-headers -o custom-columns=":spec.volumeName")/" -e "s/#POD_NAME#/$(kubectl get po -l app=nginx --no-headers -o custom-columns=":metadata.name")/" > workload/00-assert.yaml'
   - command: kubectl-kuttl assert workload
