@@ -6,6 +6,7 @@ metadata:
 spec:
   storageClassName: ebs-sc
   capacity: 1Gi
+  # %d is optional, but will automatically appended for second drive if missing
   mountPointPattern: /media/discoblocks/sample-%d
   nodeSelector:
     matchLabels:
