@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/ondat/discoblocks/pkg/drivers"
@@ -35,7 +36,7 @@ import (
 )
 
 // log is for logging in this package
-var diskConfigLog = logf.Log.WithName("DiskConfigWebhook")
+var diskConfigLog = logf.Log.WithName("v1.DiskConfigWebhook")
 
 // SetupWebhookWithManager sets up the webhook with the Manager.
 func (r *DiskConfig) SetupWebhookWithManager(mgr ctrl.Manager) error {
@@ -94,6 +95,11 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 	if maxCapacity.CmpInt64(0) != 0 && maxCapacity.Cmp(newCapacity) == -1 {
 		logger.Info("Capacity is more then max")
 		return errors.New("invalid new capacity, more then max")
+	}
+
+	if strings.Count(r.Spec.MountPointPattern, "%d") > 1 {
+		logger.Info("Only one %d allowed")
+		return errors.New("invalid mount pattern, only one %d allowed")
 	}
 
 	if old != nil {

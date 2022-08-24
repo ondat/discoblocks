@@ -44,11 +44,11 @@ spec:
                   type: string
                 type: array
               availabilityMode:
-                default: Multiple
+                default: ReadWriteOnce
                 description: AvailabilityMode defines the desired number of instances.
                 enum:
-                - Singleton
-                - Multiple
+                - ReadWriteSame
+                - ReadWriteOnce
                 type: string
               capacity:
                 default: 1Gi
@@ -119,16 +119,16 @@ spec:
                 description: Policy contains the disk scale policies.
                 properties:
                   maximumCapacityOfDisk:
-                    default: 100Gi
+                    default: 1000Gi
                     description: MaximumCapacityOfDisks defines maximum capacity of
                       a disk.
                     pattern: ^(\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$
                     type: string
                   maximumNumberOfDisks:
-                    default: 10
+                    default: 1
                     description: MaximumCapacityOfDisks defines maximum number of
                       a disks.
-                    maximum: 1000
+                    maximum: 150
                     minimum: 1
                     type: integer
                   pause:

@@ -3,26 +3,27 @@ package mutators
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"time"
 
 	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
-	"github.com/ondat/discoblocks/pkg/drivers"
 	"github.com/ondat/discoblocks/pkg/utils"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
 // log is for logging in this package
-var podMutatorLog = logf.Log.WithName("PodMutator")
+var podMutatorLog = logf.Log.WithName("mutators.PodMutator")
 
 type PodMutator struct {
 	Client  client.Client
@@ -66,6 +67,10 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 	volumes := map[string]string{}
 	for i := range diskConfigs.Items {
+		if diskConfigs.Items[i].DeletionTimestamp != nil {
+			continue
+		}
+
 		config := diskConfigs.Items[i]
 
 		if !utils.IsContainsAll(pod.Labels, config.Spec.PodSelector) {
@@ -77,22 +82,15 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		}
 		pod.Labels["discoblocks/metrics"] = config.Name
 
-		//nolint:govet // logger is ok to shadowing
 		logger := logger.WithValues("name", config.Name, "sc_name", config.Spec.StorageClassName)
 		logger.Info("Attach volume to workload...")
-
-		capacity, err := resource.ParseQuantity(config.Spec.Capacity)
-		if err != nil {
-			logger.Error(err, "Capacity is invalid")
-			return errorMode(http.StatusNotAcceptable, "Capacity is invalid:"+config.Spec.Capacity, err)
-		}
 
 		logger.Info("Fetch StorageClass...")
 
 		sc := storagev1.StorageClass{}
-		if err = a.Client.Get(ctx, types.NamespacedName{Name: config.Spec.StorageClassName}, &sc); err != nil {
+		if err := a.Client.Get(ctx, types.NamespacedName{Name: config.Spec.StorageClassName}, &sc); err != nil {
 			if apierrors.IsNotFound(err) {
-				logger.Info("StorageClass not found")
+				logger.Info("StorageClass not found", "name", config.Spec.StorageClassName)
 				return errorMode(http.StatusNotFound, "StorageClass not found: "+config.Spec.StorageClassName, err)
 			}
 			logger.Info("Unable to fetch StorageClass", "error", err.Error())
@@ -100,42 +98,14 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		}
 		logger = logger.WithValues("provisioner", sc.Provisioner)
 
-		driver := drivers.GetDriver(sc.Provisioner)
-		if driver == nil {
-			logger.Info("Driver not found")
-			return errorMode(http.StatusNotFound, "Driver not found: "+sc.Provisioner, errors.New("driver not found: "+sc.Provisioner))
-		}
-
-		preFix := config.CreationTimestamp.String()
-		if config.Spec.AvailabilityMode != discoblocksondatiov1.Singleton {
-			preFix = time.Now().String()
-		}
-
-		pvcName, err := utils.RenderPVCName(preFix, config.Name, config.Namespace)
+		var pvc *corev1.PersistentVolumeClaim
+		pvc, err := utils.NewPVC(&config, config.Spec.AvailabilityMode, "", sc.Provisioner, logger)
 		if err != nil {
-			logger.Error(err, "Unable to calculate hash")
-			return errorMode(http.StatusInternalServerError, "unable to calculate hash", err)
-		}
-		logger = logger.WithValues("pvc_name", pvcName)
-
-		pvc, err := driver.GetPVCStub(pvcName, config.Namespace, config.Spec.StorageClassName)
-		if err != nil {
-			logger.Error(err, "Unable to init a PVC", "provisioner", sc.Provisioner)
-			return errorMode(http.StatusInternalServerError, "Unable to init a PVC", err)
+			return errorMode(http.StatusInternalServerError, err.Error(), err)
 		}
 
-		pvc.Finalizers = []string{utils.RenderFinalizer(config.Name)}
-		pvc.Labels = map[string]string{
-			"discoblocks": config.Name,
-		}
-		pvc.Spec.Resources = corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{
-				corev1.ResourceStorage: capacity,
-			},
-		}
-		pvc.Spec.AccessModes = config.Spec.AccessModes
-		if len(pvc.Spec.AccessModes) == 0 {
-			pvc.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
+		pvcNamesWithMount := map[string]string{
+			pvc.Name: utils.RenderMountPoint(config.Spec.MountPointPattern, pvc.Name, 0),
 		}
 
 		logger.Info("Create PVC...")
@@ -146,25 +116,58 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 			}
 
 			logger.Info("PVC already exists")
-		}
 
-		mountpoint := utils.RenderMountPoint(config.Spec.MountPointPattern, pvc.Name, 0)
-		for name, mp := range volumes {
-			if mp == mountpoint {
-				logger.Info("Mount point already added", "exists", name, "actual", pvcName, "mountpoint", sc.Provisioner)
-				return errorMode(http.StatusInternalServerError, "Unable to init a PVC", err)
+			if config.Spec.AvailabilityMode == discoblocksondatiov1.ReadWriteSame {
+				label, err := labels.NewRequirement("discoblocks-parent", selection.Equals, []string{pvc.Name})
+				if err != nil {
+					logger.Error(err, "Unable to parse PVC label selector")
+					return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to parse PVC label selectors: %w", err))
+				}
+				pvcSelector := labels.NewSelector().Add(*label)
+
+				pvcs := corev1.PersistentVolumeClaimList{}
+				if err = a.Client.List(ctx, &pvcs, &client.ListOptions{
+					Namespace:     config.Namespace,
+					LabelSelector: pvcSelector,
+				}); err != nil {
+					logger.Error(err, "Unable to fetch PVCs")
+					return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to fetch PVCs: %w", err))
+				}
+
+				sort.SliceStable(pvcs.Items, func(i, j int) bool {
+					return pvcs.Items[i].CreationTimestamp.UnixNano() < pvcs.Items[j].CreationTimestamp.UnixNano()
+				})
+
+				// XXX Guarantee it gets the same index, don't forget calculation by metrics
+				for i := range pvcs.Items {
+					if pvcs.Items[i].DeletionTimestamp != nil || !controllerutil.ContainsFinalizer(&pvcs.Items[i], utils.RenderFinalizer(config.Name)) {
+						continue
+					}
+
+					pvcNamesWithMount[pvcs.Items[i].Name] = utils.RenderMountPoint(config.Spec.MountPointPattern, pvcs.Items[i].Name, i+1)
+				}
 			}
 		}
-		volumes[pvcName] = mountpoint
 
-		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
-			Name: pvcName,
-			VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: pvcName,
+		for pvcName, mountpoint := range pvcNamesWithMount {
+			for name, mp := range volumes {
+				if mp == mountpoint {
+					logger.Info("Mount point already added", "exists", name, "actual", pvcName, "mountpoint", sc.Provisioner)
+					return errorMode(http.StatusInternalServerError, "Unable to init a PVC", err)
+				}
+			}
+
+			volumes[pvcName] = mountpoint
+
+			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+				Name: pvcName,
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: pvcName,
+					},
 				},
-			},
-		})
+			})
+		}
 	}
 
 	if len(volumes) == 0 {
@@ -181,22 +184,6 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		return admission.Allowed("Metrics sidecar template invalid")
 	}
 	pod.Spec.Containers = append(pod.Spec.Containers, *metricsSideCar)
-
-	// TODO manager sidecar is needed to mount disks on the fly
-	// managerSideCar, err := utils.RenderManagerSidecar()
-	// if err != nil {
-	// 	logger.Error(err, "Manager sidecar template invalid")
-	// 	return admission.Allowed("Manager sidecar template invalid")
-	// }
-	// pod.Spec.Containers = append(pod.Spec.Containers, *managerSideCar)
-	// pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
-	// 	Name: "dev",
-	// 	VolumeSource: corev1.VolumeSource{
-	// 		HostPath: &corev1.HostPathVolumeSource{
-	// 			Path: "/dev",
-	// 		},
-	// 	},
-	// })
 
 	logger.Info("Attach volume mounts...")
 

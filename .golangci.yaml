@@ -14,8 +14,6 @@ linters-settings:
     disabled-checks:
       - unnamedResult
       - hugeParam
-  govet:
-    check-shadowing: true
   nolintlint:
     require-explanation: true
     require-specific: true

@@ -59,7 +59,7 @@ func (s *podFilter) Filter(ctx context.Context, state *framework.CycleState, pod
 	for i := range diskConfigs.Items {
 		config := diskConfigs.Items[i]
 
-		if !utils.IsContainsAll(pod.Labels, config.Spec.PodSelector) {
+		if config.DeletionTimestamp != nil || !utils.IsContainsAll(pod.Labels, config.Spec.PodSelector) {
 			continue
 		}
 
@@ -83,7 +83,6 @@ func (s *podFilter) Filter(ctx context.Context, state *framework.CycleState, pod
 	}
 
 	for scName := range storageClasses {
-		//nolint:govet // logger is ok to shadowing
 		logger := logger.WithValues("sc_name", scName)
 
 		logger.Info("Fetch StorageClass...")

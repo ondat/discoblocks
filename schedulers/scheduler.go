@@ -11,7 +11,7 @@ import (
 )
 
 // log is for logging in this package
-var schedulerLog = logf.Log.WithName("Scheduler")
+var schedulerLog = logf.Log.WithName("schedulers.Scheduler")
 
 // Scheduler HTTP service for schedulers
 type Scheduler struct {
