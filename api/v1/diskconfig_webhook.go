@@ -96,6 +96,8 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 		return errors.New("invalid new capacity, more then max")
 	}
 
+	// XXX validate, only one %d allowed
+
 	if old != nil {
 		oldDC, ok := old.(*DiskConfig)
 		if !ok {

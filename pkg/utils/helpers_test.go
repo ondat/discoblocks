@@ -81,3 +81,8 @@ func TestParsePrometheusMetricValue(t *testing.T) {
 	assert.Nil(t, err, "invalid metric")
 	assert.Equal(t, float64(1020678144), value)
 }
+
+func TestIsGreater(t *testing.T) {
+	assert.True(t, IsGreater("foo-1", ""))
+	assert.True(t, IsGreater("foo-10", "foo-2"))
+}

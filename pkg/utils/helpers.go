@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"math/big"
+	"regexp"
 	"strings"
 
 	dto "github.com/prometheus/client_model/go"
@@ -42,19 +43,6 @@ command:
 - --collector.disable-defaults
 - --collector.filesystem`
 
-// TODO maybe a config map for templates makes sense
-const sidecarTeamplate = `name: discoblocks-manager
-image: alpine:3.15.4
-command:
-- sleep
-- infinity
-volumeMounts:
-- name: dev
-  mountPath: /host/dev
-securityContext:
-  allowPrivilegeEscalation: true
-  privileged: true`
-
 // RenderMountPoint calculates mount point
 func RenderMountPoint(pattern, name string, index int) string {
 	if pattern == "" {
@@ -62,7 +50,7 @@ func RenderMountPoint(pattern, name string, index int) string {
 	}
 
 	if index != 0 && !strings.Contains(pattern, "%d") {
-		pattern = pattern + "-%d"
+		pattern += "-%d"
 	}
 
 	if !strings.Contains(pattern, "%d") {
@@ -120,16 +108,6 @@ func RenderMetricsSidecar() (*corev1.Container, error) {
 	return &sidecar, nil
 }
 
-// RenderManagerSidecar returns the manager sidecar
-func RenderManagerSidecar() (*corev1.Container, error) {
-	sidecar := corev1.Container{}
-	if err := yaml.Unmarshal([]byte(sidecarTeamplate), &sidecar); err != nil {
-		return nil, err
-	}
-
-	return &sidecar, nil
-}
-
 // IsContainsAll finds for a contains all b
 func IsContainsAll(a, b map[string]string) bool {
 	match := 0
@@ -166,4 +144,24 @@ func ParsePrometheusMetricValue(metric string) (float64, error) {
 	f, _ := flt.Float64()
 
 	return f, err
+}
+
+// IsGreater compares string in natural order
+func IsGreater(a, b string) bool {
+	numberRegex := regexp.MustCompile(`\d+`)
+
+	convert := func(i string) string {
+		numbers := map[string]bool{}
+		for _, n := range numberRegex.FindAll([]byte(i), -1) {
+			numbers[string(n)] = true
+		}
+
+		for n := range numbers {
+			i = strings.ReplaceAll(i, n, fmt.Sprintf("%09s", n))
+		}
+
+		return i
+	}
+
+	return convert(a) > convert(b)
 }
