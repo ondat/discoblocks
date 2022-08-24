@@ -22,6 +22,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,8 +32,10 @@ import (
 	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
 	"github.com/ondat/discoblocks/pkg/utils"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/selection"
@@ -132,6 +137,8 @@ func (r *PVCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 func (r *PVCReconciler) MonitorVolumes() {
 	logger := logf.Log.WithName("VolumeMonitor")
 
+	// XXX happy flow logging
+
 	logger.Info("Monitoring Volumes...")
 	defer logger.Info("Monitor done")
 
@@ -156,6 +163,10 @@ func (r *PVCReconciler) MonitorVolumes() {
 	discoblocks := map[types.NamespacedName][]string{}
 	metrics := map[types.NamespacedName][]string{}
 	for i := range endpoints.Items {
+		if endpoints.Items[i].DeletionTimestamp != nil {
+			continue
+		}
+
 		// TODO detect not managed, finalizer like PVC if possible
 
 		for _, ss := range endpoints.Items[i].Subsets {
@@ -195,7 +206,7 @@ func (r *PVCReconciler) MonitorVolumes() {
 				}
 
 				for _, line := range strings.Split(string(rawBody), "\n") {
-					if strings.HasPrefix(line, "#") || !strings.Contains(line, "node_filesystem_avail_bytes") {
+					if !strings.HasPrefix(line, "node_filesystem_avail_bytes") {
 						continue
 					}
 
@@ -203,6 +214,19 @@ func (r *PVCReconciler) MonitorVolumes() {
 						metrics[podName] = []string{}
 					}
 					metrics[podName] = append(metrics[podName], line)
+				}
+
+				for _, metric := range metrics[podName] {
+					mf, err := utils.ParsePrometheusMetric(metric)
+					if err != nil {
+						logger.Error(err, "Failed to parse metrics")
+						continue
+					}
+
+					if _, ok := mf["node_filesystem_avail_bytes"]; !ok {
+						logger.Error(err, "Failed to find metric", "metric", metric)
+						continue
+					}
 				}
 			}
 		}
@@ -246,6 +270,18 @@ func (r *PVCReconciler) MonitorVolumes() {
 				continue
 			}
 
+			mountPointPattern := strings.Replace(config.Spec.MountPointPattern, "%d", `(\d+)`, 1)
+			if !strings.Contains(mountPointPattern, `(\d+)`) {
+				mountPointPattern += `-(\d+)`
+			}
+
+			mountPointRegexp, err := regexp.Compile(mountPointPattern)
+			if err != nil {
+				logger.Error(err, "Failed to convert mount pattern to regexp error", "pattern", mountPointPattern)
+				continue
+			}
+
+			// XXX produce metrics of the operations below, included error across the entire project :)
 			for _, metric := range metrics[podName] {
 				mf, err := utils.ParsePrometheusMetric(metric)
 				if err != nil {
@@ -258,51 +294,49 @@ func (r *PVCReconciler) MonitorVolumes() {
 					continue
 				}
 
-				mountpoint := ""
-				for _, m := range mf["node_filesystem_avail_bytes"].Metric {
-					for _, l := range m.Label {
-						if *l.Name == "mountpoint" {
-							mountpoint = *l.Value
-						}
+				label, err := labels.NewRequirement("discoblocks", selection.Equals, []string{config.Name})
+				if err != nil {
+					logger.Error(err, "Unable to parse PVC label selector")
+					continue
+				}
+				pvcSelector := labels.NewSelector().Add(*label)
+
+				pvcs := corev1.PersistentVolumeClaimList{}
+				if err = r.Client.List(ctx, &pvcs, &client.ListOptions{
+					Namespace:     config.Namespace,
+					LabelSelector: pvcSelector,
+				}); err != nil {
+					logger.Error(err, "Unable to fetch PVCs")
+					continue
+				}
+
+				livePVCs := []*corev1.PersistentVolumeClaim{}
+				for i := range pvcs.Items {
+					if pvcs.Items[i].DeletionTimestamp != nil ||
+						!controllerutil.ContainsFinalizer(&pvcs.Items[i], utils.RenderFinalizer(config.Name)) ||
+						pvcs.Items[i].Status.ResizeStatus != nil && *pvcs.Items[i].Status.ResizeStatus != corev1.PersistentVolumeClaimNoExpansionInProgress {
+						continue
 					}
+
+					livePVCs = append(livePVCs, &pvcs.Items[i])
 				}
-				if mountpoint == "" {
-					logger.Error(err, "Failed to find mountpoint")
+
+				if len(livePVCs) == 0 {
+					logger.Error(err, "Unable to find any PVC")
 					continue
 				}
 
-				if mountpoint != utils.RenderMountPoint(config.Spec.MountPointPattern, config.Name, 0) {
-					continue
-				}
+				sort.SliceStable(livePVCs, func(i, j int) bool {
+					return livePVCs[i].CreationTimestamp.UnixNano() < livePVCs[j].CreationTimestamp.UnixNano()
+				})
 
-				var pvcName types.NamespacedName
-				for i := range pod.Spec.Containers[0].VolumeMounts {
-					vm := pod.Spec.Containers[0].VolumeMounts[i]
+				parentPVC := livePVCs[0]
+				lastPVC := livePVCs[len(livePVCs)-1]
 
-					if vm.MountPath == mountpoint {
-						pvcName = types.NamespacedName{Namespace: pod.Namespace, Name: vm.Name}
-						break
-					}
-				}
-				if pvcName.Name == "" {
-					logger.Error(err, "Volume not found")
-					continue
-				}
+				const hundred = 100
 
-				// TODO maybe cache them and resize to the biggest in one step
-				pvc := corev1.PersistentVolumeClaim{}
-				if err = r.Client.Get(ctx, pvcName, &pvc); err != nil {
-					logger.Error(err, "Failed to fetch PVC")
-					continue
-				}
-				logger = logger.WithValues("pvc_name", pvc.Name)
-
-				if !controllerutil.ContainsFinalizer(&pvc, utils.RenderFinalizer(config.Name)) {
-					logger.Info("PVC not managed by", "config", pvc.Labels["discoblocks"])
-					continue
-				}
-
-				// TODO abort if resizing by condition or pvc.Status.ResizeStatus
+				actualCapacity := lastPVC.Status.Capacity.Storage()
+				treshold := actualCapacity.AsApproximateFloat64() * float64(config.Spec.Policy.UpscaleTriggerPercentage) / hundred
 
 				available, err := utils.ParsePrometheusMetricValue(metric)
 				if err != nil {
@@ -316,11 +350,6 @@ func (r *PVCReconciler) MonitorVolumes() {
 					continue
 				}
 
-				const hundred = 100
-
-				actualCapacity := pvc.Status.Capacity.Storage()
-				treshold := actualCapacity.AsApproximateFloat64() * float64(config.Spec.Policy.UpscaleTriggerPercentage) / hundred
-
 				logger.Info("Capacities", "available", available, "treshold", treshold, "actual", actualCapacity.AsApproximateFloat64(), "max", maxCapacity.AsApproximateFloat64())
 
 				if treshold > actualCapacity.AsApproximateFloat64()-available {
@@ -328,35 +357,159 @@ func (r *PVCReconciler) MonitorVolumes() {
 					continue
 				}
 
-				if actualCapacity.Cmp(maxCapacity) == 0 {
+				newCapacity, err := resource.ParseQuantity("1Gi")
+				if err != nil {
+					logger.Error(err, "Extend capacity is invalid")
+					return
+				}
+
+				newCapacity.Add(*actualCapacity)
+
+				logger = logger.WithValues("new_capacity", newCapacity.String(), "max_capacity", config.Spec.Policy.MaximumCapacityOfDisk, "max_disks", config.Spec.Policy.MaximumNumberOfDisks)
+
+				if newCapacity.Cmp(maxCapacity) == 1 {
+					if config.Spec.Policy.MaximumNumberOfDisks > 0 && len(livePVCs) >= int(config.Spec.Policy.MaximumNumberOfDisks) {
+						logger.Info("Already maximum number of disks", "number", config.Spec.Policy.MaximumNumberOfDisks)
+						continue
+					}
+
 					logger.Info("New disk needed")
+
+					mountpoint := ""
+					for _, m := range mf["node_filesystem_avail_bytes"].Metric {
+						for _, l := range m.Label {
+							if l.Value != nil && *l.Name == "mountpoint" &&
+								mountPointRegexp.MatchString(*l.Value) &&
+								(mountpoint == "" || utils.IsGreater(mountpoint, *l.Value)) {
+								mountpoint = *l.Value
+							}
+						}
+					}
+
+					if mountpoint == "" {
+						logger.Error(errors.New("mountpoint not found"), "Mount point not found")
+						continue
+					}
+
+					logger.Info("Mount point found", "mountpoint", mountpoint)
+
+					//nolint:govet // logger is ok to shadowing
+					logger := logger.WithValues("mountpoint", mountpoint)
+
+					next := 1
+
+					// XXX TODO maybe this should fail in edge cases (mount pattern contains other number before the counter)
+					mpSubs := mountPointRegexp.FindStringSubmatch(mountpoint)
+					if len(mpSubs) > 0 {
+						next, err = strconv.Atoi(mpSubs[1])
+						if err != nil {
+							logger.Info("Unable to find numeric order in mount path", "mountpoint", mountpoint, "error", err.Error())
+							continue
+						}
+
+						next++
+					}
+
+					// XXX support non containerd backends
+					containerIDs := []string{}
+					for i := range pod.Status.ContainerStatuses {
+						containerIDs = append(containerIDs, strings.ReplaceAll(pod.Status.ContainerStatuses[i].ContainerID, "containerd://", ""))
+					}
+
+					r.createPVC(ctx, logger, parentPVC, containerIDs, next, &config)
+
 					continue
 				}
 
 				logger.Info("Resize needed")
-				newCapacity, err := resource.ParseQuantity("1Gi")
-				if err != nil {
-					logger.Error(err, "Extend capacity is invalid")
-					continue
-				}
-				newCapacity.Add(*actualCapacity)
-
-				if maxCapacity.Cmp(newCapacity) == -1 {
-					logger.Info("Set to max capacity")
-
-					newCapacity = maxCapacity
-				}
-
-				logger.Info("Updating PVC...", "capacity", actualCapacity.AsApproximateFloat64())
-
-				pvc.Spec.Resources.Requests[corev1.ResourceStorage] = newCapacity
-
-				if err = r.Update(ctx, &pvc); err != nil {
-					logger.Error(err, "Failed to update PVC")
-					continue
-				}
+				r.resizePVC(ctx, logger, newCapacity, lastPVC)
 			}
 		}
+	}
+}
+
+func (r *PVCReconciler) createPVC(ctx context.Context, logger logr.Logger, parentPVC *corev1.PersistentVolumeClaim, containerIDs []string, nextIndex int, config *discoblocksondatiov1.DiskConfig) {
+	sc := storagev1.StorageClass{}
+	if err := r.Client.Get(ctx, types.NamespacedName{Name: config.Spec.StorageClassName}, &sc); err != nil {
+		if apierrors.IsNotFound(err) {
+			logger.Error(err, "StorageClass not found", "name", config.Spec.StorageClassName)
+			return
+		}
+		logger.Error(err, "Unable to fetch StorageClass", "error", err.Error())
+		return
+	}
+
+	pvc, err := utils.NewPVC(config, sc.Provisioner, logger)
+	if err != nil {
+		logger.Error(err, "Unable to construct new PVC")
+		return
+	}
+
+	pvc.OwnerReferences = append(pvc.OwnerReferences, metav1.OwnerReference{
+		APIVersion: parentPVC.APIVersion,
+		Kind:       parentPVC.Kind,
+		Name:       parentPVC.Name,
+		UID:        parentPVC.UID,
+	})
+
+	if err = r.Create(ctx, pvc); err != nil {
+		logger.Error(err, "Failed to create PVC")
+		return
+	}
+
+	for {
+		if err = r.Get(ctx, types.NamespacedName{Namespace: pvc.Namespace, Name: pvc.Name}, pvc); err == nil && pvc.Spec.VolumeName != "" {
+			break
+		}
+	}
+
+	volumeAttachment := &storagev1.VolumeAttachment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: pvc.Name,
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: pvc.APIVersion,
+					Kind:       pvc.Kind,
+					Name:       pvc.Name,
+					UID:        pvc.UID,
+				},
+			},
+		},
+		Spec: storagev1.VolumeAttachmentSpec{
+			Attacher: "csi.storageos.com",
+			Source: storagev1.VolumeAttachmentSource{
+				PersistentVolumeName: &pvc.Spec.VolumeName,
+			},
+			NodeName: "kind-control-plane",
+		},
+	}
+
+	if err = r.Create(ctx, volumeAttachment); err != nil {
+		logger.Error(err, "Failed to create volume attachment")
+		return
+	}
+
+	mountJob, err := utils.RenderMountJob(pvc.Name, pvc.Namespace, string(pvc.UID), utils.RenderMountPoint(config.Spec.MountPointPattern, config.Name, nextIndex), containerIDs)
+	if err != nil {
+		logger.Error(err, "Unable to render mount job")
+		return
+	}
+
+	if err := r.Create(ctx, mountJob); err != nil {
+		logger.Error(err, "Failed to create mount job")
+		return
+	}
+
+	// XXX support non Immediate
+}
+
+func (r *PVCReconciler) resizePVC(ctx context.Context, logger logr.Logger, capacity resource.Quantity, pvc *corev1.PersistentVolumeClaim) {
+	logger.Info("Updating PVC...", "capacity", capacity.AsApproximateFloat64())
+
+	pvc.Spec.Resources.Requests[corev1.ResourceStorage] = capacity
+
+	if err := r.Update(ctx, pvc); err != nil {
+		logger.Error(err, "Failed to update PVC")
 	}
 }
 

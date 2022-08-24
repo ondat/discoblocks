@@ -59,7 +59,7 @@ func (s *podFilter) Filter(ctx context.Context, state *framework.CycleState, pod
 	for i := range diskConfigs.Items {
 		config := diskConfigs.Items[i]
 
-		if !utils.IsContainsAll(pod.Labels, config.Spec.PodSelector) {
+		if config.DeletionTimestamp != nil || !utils.IsContainsAll(pod.Labels, config.Spec.PodSelector) {
 			continue
 		}
 

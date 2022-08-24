@@ -79,14 +79,14 @@ type Policy struct {
 
 	// MaximumCapacityOfDisks defines maximum capacity of a disk.
 	//+kubebuilder:validation:Pattern:="^(\\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$"
-	//+kubebuilder:default:="100Gi"
+	//+kubebuilder:default:="1000Gi"
 	//+kubebuilder:validation:Optional
 	MaximumCapacityOfDisk string `json:"maximumCapacityOfDisk,omitempty" yaml:"maximumCapacityOfDisk,omitempty"`
 
 	// MaximumCapacityOfDisks defines maximum number of a disks.
-	//+kubebuilder:default:=10
+	//+kubebuilder:default:=1
 	//+kubebuilder:validation:Minimum:=1
-	//+kubebuilder:validation:Maximum:=1000
+	//+kubebuilder:validation:Maximum:=150
 	//+kubebuilder:validation:Optional
 	MaximumNumberOfDisks uint8 `json:"maximumNumberOfDisks,omitempty" yaml:"maximumNumberOfDisks,omitempty"`
 
