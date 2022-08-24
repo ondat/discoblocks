@@ -68,6 +68,12 @@ rules:
   - list
   - watch
 - apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+- apiGroups:
   - discoblocks.ondat.io
   resources:
   - diskconfigs
@@ -120,3 +126,9 @@ rules:
   - storageclasses/finalizers
   verbs:
   - update
+- apiGroups:
+  - storage.k8s.io
+  resources:
+  - volumeattachments
+  verbs:
+  - create

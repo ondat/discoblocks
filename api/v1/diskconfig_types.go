@@ -52,7 +52,7 @@ type DiskConfigSpec struct {
 	AccessModes []corev1.PersistentVolumeAccessMode `json:"accessModes,omitempty" yaml:"accessModes,omitempty"`
 
 	// AvailabilityMode defines the desired number of instances.
-	//+kubebuilder:default:="Multiple"
+	//+kubebuilder:default:="ReadWriteOnce"
 	//+kubebuilder:validation:Optional
 	AvailabilityMode AvailabilityMode `json:"availabilityMode,omitempty" yaml:"availabilityMode,omitempty"`
 
@@ -79,14 +79,14 @@ type Policy struct {
 
 	// MaximumCapacityOfDisks defines maximum capacity of a disk.
 	//+kubebuilder:validation:Pattern:="^(\\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$"
-	//+kubebuilder:default:="100Gi"
+	//+kubebuilder:default:="1000Gi"
 	//+kubebuilder:validation:Optional
 	MaximumCapacityOfDisk string `json:"maximumCapacityOfDisk,omitempty" yaml:"maximumCapacityOfDisk,omitempty"`
 
 	// MaximumCapacityOfDisks defines maximum number of a disks.
-	//+kubebuilder:default:=10
+	//+kubebuilder:default:=1
 	//+kubebuilder:validation:Minimum:=1
-	//+kubebuilder:validation:Maximum:=1000
+	//+kubebuilder:validation:Maximum:=150
 	//+kubebuilder:validation:Optional
 	MaximumNumberOfDisks uint8 `json:"maximumNumberOfDisks,omitempty" yaml:"maximumNumberOfDisks,omitempty"`
 
@@ -120,12 +120,12 @@ const (
 	Deleting Phase = "Deleting"
 )
 
-// +kubebuilder:validation:Enum=Singleton;Multiple
+// +kubebuilder:validation:Enum=ReadWriteSame;ReadWriteOnce
 type AvailabilityMode string
 
 const (
-	Singleton AvailabilityMode = "Singleton"
-	Multiple  AvailabilityMode = "Multiple"
+	ReadWriteSame AvailabilityMode = "ReadWriteSame"
+	ReadWriteOnce AvailabilityMode = "ReadWriteOnce"
 )
 
 //+kubebuilder:object:root=true
