@@ -137,13 +137,12 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 	scFinalizer := utils.RenderFinalizer(configName, configNamespace)
 
 	for i := range scList.Items {
-		if !controllerutil.ContainsFinalizer(&scList.Items[i], scFinalizer) {
+		if scList.Items[i].DeletionTimestamp != nil || !controllerutil.ContainsFinalizer(&scList.Items[i], scFinalizer) {
 			continue
 		}
 
 		controllerutil.RemoveFinalizer(&scList.Items[i], scFinalizer)
 
-		//nolint:govet // logger is ok to shadowing
 		logger := logger.WithValues("sc_name", scList.Items[i].Name)
 		logger.Info("Remove StorageClass finalizer...", "finalizer", scFinalizer)
 
@@ -151,24 +150,6 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 			logger.Info("Failed to remove finalizer of StorageClass", "error", err.Error())
 			return ctrl.Result{}, fmt.Errorf("unable to remove finalizer of StorageClass: %w", err)
 		}
-	}
-
-	logger.Info("Fetch PVCs...")
-
-	label, err := labels.NewRequirement("discoblocks", selection.Equals, []string{configName})
-	if err != nil {
-		logger.Error(err, "Unable to parse PVC label selector")
-		return ctrl.Result{}, nil
-	}
-	pvcSelector := labels.NewSelector().Add(*label)
-
-	pvcList := corev1.PersistentVolumeClaimList{}
-	if err = r.List(ctx, &pvcList, &client.ListOptions{
-		Namespace:     configNamespace,
-		LabelSelector: pvcSelector,
-	}); err != nil {
-		logger.Info("Failed to list PVCs", "error", err.Error())
-		return ctrl.Result{}, fmt.Errorf("unable to list PVCs: %w", err)
 	}
 
 	finalizer := utils.RenderFinalizer(configName)
@@ -201,6 +182,24 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 	errChan := make(chan error)
 	wg := sync.WaitGroup{}
 
+	logger.Info("Fetch PVCs...")
+
+	label, err := labels.NewRequirement("discoblocks", selection.Equals, []string{configName})
+	if err != nil {
+		logger.Error(err, "Unable to parse PVC label selector")
+		return ctrl.Result{}, nil
+	}
+	pvcSelector := labels.NewSelector().Add(*label)
+
+	pvcList := corev1.PersistentVolumeClaimList{}
+	if err = r.List(ctx, &pvcList, &client.ListOptions{
+		Namespace:     configNamespace,
+		LabelSelector: pvcSelector,
+	}); err != nil {
+		logger.Info("Failed to list PVCs", "error", err.Error())
+		return ctrl.Result{}, fmt.Errorf("unable to list PVCs: %w", err)
+	}
+
 	for i := range pvcList.Items {
 		if !controllerutil.ContainsFinalizer(&pvcList.Items[i], utils.RenderFinalizer(pvcList.Items[i].Labels["discoblocks"])) {
 			logger.Info("PVC not managed by", "config", pvcList.Items[i].Labels["discoblocks"])
@@ -224,7 +223,6 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 			if controllerutil.ContainsFinalizer(&pvcList.Items[i], finalizer) {
 				controllerutil.RemoveFinalizer(&pvcList.Items[i], finalizer)
 
-				//nolint:govet // logger is ok to shadowing
 				logger := logger.WithValues("pvc_name", pvcList.Items[i].Name, "pvc_namespace", pvcList.Items[i].Namespace)
 				logger.Info("Update PVC finalizer...", "finalizer", finalizer)
 
