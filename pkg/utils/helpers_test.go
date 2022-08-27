@@ -53,12 +53,6 @@ func TestRenderMountPoint(t *testing.T) {
 	}
 }
 
-func TestGetSidecarStub(t *testing.T) {
-	_, err := RenderMetricsSidecar()
-
-	assert.Nil(t, err, "invalid sidecar template")
-}
-
 func TestParsePrometheusMetric(t *testing.T) {
 	mf, err := ParsePrometheusMetric(`node_filesystem_free_bytes{device="/dev/nvme1n1",fstype="ext4",mountpoint="/media/discoblocks/sample-0"} 1.020678144e+09`)
 

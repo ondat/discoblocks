@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"time"
 
 	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
@@ -12,8 +13,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
@@ -63,6 +67,10 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 	volumes := map[string]string{}
 	for i := range diskConfigs.Items {
+		if diskConfigs.Items[i].DeletionTimestamp != nil {
+			continue
+		}
+
 		config := diskConfigs.Items[i]
 
 		if !utils.IsContainsAll(pod.Labels, config.Spec.PodSelector) {
@@ -91,41 +99,74 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		}
 		logger = logger.WithValues("provisioner", sc.Provisioner)
 
-		// XXX load PVC by label, find brothers by owner reference
-		pvc, err := utils.NewPVC(&config, sc.Provisioner, true, logger)
+		logger.Info("Fetch PVCs...")
+
+		label, err := labels.NewRequirement("discoblocks", selection.Equals, []string{config.Name})
 		if err != nil {
-			return errorMode(http.StatusInternalServerError, err.Error(), err)
+			logger.Error(err, "Unable to parse PVC label selector")
+			return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to parse PVC label selectors: %w", err))
+		}
+		pvcSelector := labels.NewSelector().Add(*label)
+
+		pvcs := corev1.PersistentVolumeClaimList{}
+		if err = a.Client.List(ctx, &pvcs, &client.ListOptions{
+			LabelSelector: pvcSelector,
+		}); err != nil {
+			logger.Error(err, "Unable to fetch PVCs")
+			return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to fetch PVCs: %w", err))
 		}
 
-		logger.Info("Create PVC...")
-		if err = a.Client.Create(ctx, pvc); err != nil {
-			if !apierrors.IsAlreadyExists(err) {
-				logger.Info("Failed to create PVC", "error", err.Error())
-				return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to create PVC: %w", err))
+		pvcNamesWithMount := map[string]string{}
+		if len(pvcs.Items) == 0 {
+			var pvc *corev1.PersistentVolumeClaim
+			pvc, err = utils.NewPVC(&config, sc.Provisioner, true, logger)
+			if err != nil {
+				return errorMode(http.StatusInternalServerError, err.Error(), err)
 			}
 
-			logger.Info("PVC already exists")
-		}
+			logger.Info("Create PVC...")
+			if err = a.Client.Create(ctx, pvc); err != nil {
+				if !apierrors.IsAlreadyExists(err) {
+					logger.Info("Failed to create PVC", "error", err.Error())
+					return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to create PVC: %w", err))
+				}
 
-		mountpoint := utils.RenderMountPoint(config.Spec.MountPointPattern, pvc.Name, 0)
-		for name, mp := range volumes {
-			if mp == mountpoint {
-				logger.Info("Mount point already added", "exists", name, "actual", pvc.Name, "mountpoint", sc.Provisioner)
-				return errorMode(http.StatusInternalServerError, "Unable to init a PVC", err)
+				logger.Info("PVC already exists")
+			}
+
+			pvcNamesWithMount[pvc.Name] = utils.RenderMountPoint(config.Spec.MountPointPattern, pvc.Name, 0)
+		} else {
+			sort.SliceStable(pvcs.Items, func(i, j int) bool {
+				return pvcs.Items[i].CreationTimestamp.UnixNano() < pvcs.Items[j].CreationTimestamp.UnixNano()
+			})
+
+			for i := range pvcs.Items {
+				if pvcs.Items[i].DeletionTimestamp != nil || !controllerutil.ContainsFinalizer(&pvcs.Items[i], utils.RenderFinalizer(config.Name)) {
+					continue
+				}
+
+				pvcNamesWithMount[pvcs.Items[i].Name] = utils.RenderMountPoint(config.Spec.MountPointPattern, pvcs.Items[i].Name, i)
 			}
 		}
-		volumes[pvc.Name] = mountpoint
 
-		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
-			Name: pvc.Name,
-			VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: pvc.Name,
+		for pvcName, mountpoint := range pvcNamesWithMount {
+			for name, mp := range volumes {
+				if mp == mountpoint {
+					logger.Info("Mount point already added", "exists", name, "actual", pvcName, "mountpoint", sc.Provisioner)
+					return errorMode(http.StatusInternalServerError, "Unable to init a PVC", err)
+				}
+			}
+			volumes[pvcName] = mountpoint
+
+			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+				Name: pvcName,
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: pvcName,
+					},
 				},
-			},
-		})
-
-		// XXX attach brothers
+			})
+		}
 	}
 
 	if len(volumes) == 0 {
@@ -146,13 +187,12 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 	logger.Info("Attach volume mounts...")
 
 	for i := range pod.Spec.Containers {
+		// XXX attach only to ContainerName and exporter
 		for name, mp := range volumes {
 			pod.Spec.Containers[i].VolumeMounts = append(pod.Spec.Containers[i].VolumeMounts, corev1.VolumeMount{
 				Name:      name,
 				MountPath: mp,
 			})
-
-			// XXX attach brothers
 		}
 	}
 

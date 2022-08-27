@@ -56,6 +56,9 @@ spec:
                   volume.
                 pattern: ^(\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$
                 type: string
+              containerName:
+                description: ContainerName is the name of target continer.
+                type: string
               mountPointPattern:
                 default: /media/discoblocks/<name>-%d
                 description: MountPointPattern is the mount point of the disk. %d
@@ -148,6 +151,7 @@ spec:
                   by the config.
                 type: string
             required:
+            - containerName
             - podSelector
             type: object
           status:

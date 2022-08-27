@@ -137,7 +137,7 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 	scFinalizer := utils.RenderFinalizer(configName, configNamespace)
 
 	for i := range scList.Items {
-		if !controllerutil.ContainsFinalizer(&scList.Items[i], scFinalizer) {
+		if scList.Items[i].DeletionTimestamp != nil || !controllerutil.ContainsFinalizer(&scList.Items[i], scFinalizer) {
 			continue
 		}
 

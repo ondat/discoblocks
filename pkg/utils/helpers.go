@@ -8,40 +8,9 @@ import (
 
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
-	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/yaml"
 )
 
 const defaultMountPattern = "/media/discoblocks/%s-%d"
-
-// TODO on this way on case of multiple discoblocks on a pod,
-// all service would capture all disks leads to redundant data
-const metricsServiceTemplate = `kind: Service
-apiVersion: v1
-metadata:
-  name: %s
-  namespace: %s
-  annotations:
-    prometheus.io/path: "/metrics"
-    prometheus.io/scrape: "true"
-    prometheus.io/port:   "9100"
-spec:
-  ports:
-  - name: node-exporter
-    protocol: TCP
-    port: 9100
-    targetPort: 9100`
-
-// TODO limit filesystem reports to discoblocks (ignored-mount-points)
-const metricsTeamplate = `name: discoblocks-metrics
-image: bitnami/node-exporter:1.3.1
-ports:
-- containerPort: 9100
-  protocol: TCP
-command:
-- /opt/bitnami/node-exporter/bin/node_exporter
-- --collector.disable-defaults
-- --collector.filesystem`
 
 // RenderMountPoint calculates mount point
 func RenderMountPoint(pattern, name string, index int) string {
@@ -86,26 +55,6 @@ func RenderPVCName(elems ...string) (string, error) {
 	}
 
 	return builder.String(), nil
-}
-
-// RenderMetricsService returns the metrics service
-func RenderMetricsService(name, namespace string) (*corev1.Service, error) {
-	service := corev1.Service{}
-	if err := yaml.Unmarshal([]byte(fmt.Sprintf(metricsServiceTemplate, name, namespace)), &service); err != nil {
-		return nil, err
-	}
-
-	return &service, nil
-}
-
-// RenderMetricsSidecar returns the metrics sidecar
-func RenderMetricsSidecar() (*corev1.Container, error) {
-	sidecar := corev1.Container{}
-	if err := yaml.Unmarshal([]byte(metricsTeamplate), &sidecar); err != nil {
-		return nil, err
-	}
-
-	return &sidecar, nil
 }
 
 // IsContainsAll finds for a contains all b
