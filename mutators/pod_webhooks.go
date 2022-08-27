@@ -110,6 +110,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 		pvcs := corev1.PersistentVolumeClaimList{}
 		if err = a.Client.List(ctx, &pvcs, &client.ListOptions{
+			Namespace:     config.Namespace,
 			LabelSelector: pvcSelector,
 		}); err != nil {
 			logger.Error(err, "Unable to fetch PVCs")
@@ -119,7 +120,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		pvcNamesWithMount := map[string]string{}
 		if len(pvcs.Items) == 0 {
 			var pvc *corev1.PersistentVolumeClaim
-			pvc, err = utils.NewPVC(&config, sc.Provisioner, true, logger)
+			pvc, err = utils.NewPVC(&config, sc.Provisioner, logger)
 			if err != nil {
 				return errorMode(http.StatusInternalServerError, err.Error(), err)
 			}

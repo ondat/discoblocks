@@ -130,7 +130,7 @@ func RenderMountJob(name, namespace, mountID, mountPoint string, containerIDs []
 }
 
 // NewPVC constructs a new PVC instance
-func NewPVC(config *discoblocksondatiov1.DiskConfig, provisioner string, finalizer bool, logger logr.Logger) (*corev1.PersistentVolumeClaim, error) {
+func NewPVC(config *discoblocksondatiov1.DiskConfig, provisioner string, logger logr.Logger) (*corev1.PersistentVolumeClaim, error) {
 	preFix := config.CreationTimestamp.String()
 	if config.Spec.AvailabilityMode != discoblocksondatiov1.Singleton {
 		preFix = time.Now().String()
@@ -155,9 +155,7 @@ func NewPVC(config *discoblocksondatiov1.DiskConfig, provisioner string, finaliz
 		return nil, fmt.Errorf("unable to init a PVC: %w", err)
 	}
 
-	if finalizer {
-		pvc.Finalizers = []string{RenderFinalizer(config.Name)}
-	}
+	pvc.Finalizers = []string{RenderFinalizer(config.Name)}
 
 	pvc.Labels = map[string]string{
 		"discoblocks": config.Name,

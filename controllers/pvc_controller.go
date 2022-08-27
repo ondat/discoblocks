@@ -137,6 +137,8 @@ func (r *PVCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 func (r *PVCReconciler) MonitorVolumes() {
 	logger := logf.Log.WithName("VolumeMonitor")
 
+	// XXX happy flow logging
+
 	logger.Info("Monitoring Volumes...")
 	defer logger.Info("Monitor done")
 
@@ -277,35 +279,6 @@ func (r *PVCReconciler) MonitorVolumes() {
 					continue
 				}
 
-				mountpoint := ""
-				for _, m := range mf["node_filesystem_avail_bytes"].Metric {
-					for _, l := range m.Label {
-						if l.Value != nil &&
-							*l.Name == "mountpoint" &&
-							mountPointRegexp.Match([]byte(*l.Value)) &&
-							utils.IsGreater(*l.Value, mountpoint) {
-							mountpoint = *l.Value
-						}
-					}
-				}
-
-				if mountpoint == "" {
-					continue
-				}
-
-				println("=================================================")
-				println(mountpoint)
-				logger.Info("Mount point found", "mountpoint", mountpoint)
-
-				//nolint:govet // logger is ok to shadowing
-				logger := logger.WithValues("mountpoint", mountpoint)
-
-				maxCapacity, err := resource.ParseQuantity(config.Spec.Policy.MaximumCapacityOfDisk)
-				if err != nil {
-					logger.Error(err, "Max capacity is invalid")
-					continue
-				}
-
 				label, err := labels.NewRequirement("discoblocks", selection.Equals, []string{config.Name})
 				if err != nil {
 					logger.Error(err, "Unable to parse PVC label selector")
@@ -315,6 +288,7 @@ func (r *PVCReconciler) MonitorVolumes() {
 
 				pvcs := corev1.PersistentVolumeClaimList{}
 				if err = r.Client.List(ctx, &pvcs, &client.ListOptions{
+					Namespace:     config.Namespace,
 					LabelSelector: pvcSelector,
 				}); err != nil {
 					logger.Error(err, "Unable to fetch PVCs")
@@ -327,16 +301,13 @@ func (r *PVCReconciler) MonitorVolumes() {
 						continue
 					}
 
-					// TODO abort if resizing by condition or pvc.Status.ResizeStatus
+					// XXX abort if resizing by condition or pvc.Status.ResizeStatus
 
 					livePVCs = append(livePVCs, &pvcs.Items[i])
 				}
 
 				if len(livePVCs) == 0 {
 					logger.Error(err, "Unable to find any PVC")
-					continue
-				} else if config.Spec.Policy.MaximumNumberOfDisks > 0 && len(livePVCs) >= int(config.Spec.Policy.MaximumNumberOfDisks) {
-					logger.Info("Already maximum number of disks", "number", config.Spec.Policy.MaximumNumberOfDisks)
 					continue
 				}
 
@@ -358,6 +329,12 @@ func (r *PVCReconciler) MonitorVolumes() {
 					continue
 				}
 
+				maxCapacity, err := resource.ParseQuantity(config.Spec.Policy.MaximumCapacityOfDisk)
+				if err != nil {
+					logger.Error(err, "Max capacity is invalid")
+					continue
+				}
+
 				logger.Info("Capacities", "available", available, "treshold", treshold, "actual", actualCapacity.AsApproximateFloat64(), "max", maxCapacity.AsApproximateFloat64())
 
 				if treshold > actualCapacity.AsApproximateFloat64()-available {
@@ -376,7 +353,36 @@ func (r *PVCReconciler) MonitorVolumes() {
 				logger = logger.WithValues("new_capacity", newCapacity.String(), "max_capacity", config.Spec.Policy.MaximumCapacityOfDisk, "max_disks", config.Spec.Policy.MaximumNumberOfDisks)
 
 				if newCapacity.Cmp(maxCapacity) == 1 {
+					if config.Spec.Policy.MaximumNumberOfDisks > 0 && len(livePVCs) >= int(config.Spec.Policy.MaximumNumberOfDisks) {
+						logger.Info("Already maximum number of disks", "number", config.Spec.Policy.MaximumNumberOfDisks)
+						continue
+					}
+
 					logger.Info("New disk needed")
+
+					mountpoint := ""
+					for _, m := range mf["node_filesystem_avail_bytes"].Metric {
+						for _, l := range m.Label {
+							if l.Value != nil &&
+								*l.Name == "mountpoint" &&
+								mountPointRegexp.Match([]byte(*l.Value)) &&
+								utils.IsGreater(*l.Value, mountpoint) {
+								mountpoint = *l.Value
+							}
+						}
+					}
+
+					if mountpoint == "" {
+						logger.Error(errors.New("mountpoint not found"), "Mount point not found")
+						continue
+					}
+
+					println("=================================================")
+					println(mountpoint)
+					logger.Info("Mount point found", "mountpoint", mountpoint)
+
+					//nolint:govet // logger is ok to shadowing
+					logger := logger.WithValues("mountpoint", mountpoint)
 
 					next := 1
 
@@ -392,6 +398,7 @@ func (r *PVCReconciler) MonitorVolumes() {
 						next++
 					}
 
+					// XXX support non containerd backends
 					containerIDs := []string{}
 					for i := range pod.Status.ContainerStatuses {
 						if pod.Status.ContainerStatuses[i].Name != config.Spec.ContainerName && pod.Status.ContainerStatuses[i].Name != "discoblocks-metrics" {
@@ -401,7 +408,6 @@ func (r *PVCReconciler) MonitorVolumes() {
 						containerIDs = append(containerIDs, strings.ReplaceAll(pod.Status.ContainerStatuses[i].ContainerID, "containerd://", ""))
 					}
 
-					// XXX support non containerd backends
 					r.createPVC(ctx, logger, parentPVC, containerIDs, next, &config)
 
 					continue
@@ -425,7 +431,7 @@ func (r *PVCReconciler) createPVC(ctx context.Context, logger logr.Logger, paren
 		return
 	}
 
-	pvc, err := utils.NewPVC(config, sc.Provisioner, false, logger)
+	pvc, err := utils.NewPVC(config, sc.Provisioner, logger)
 	if err != nil {
 		logger.Error(err, "Unable to construct new PVC")
 		return
