@@ -376,10 +376,9 @@ func (r *PVCReconciler) MonitorVolumes() {
 					mountpoint := ""
 					for _, m := range mf["node_filesystem_avail_bytes"].Metric {
 						for _, l := range m.Label {
-							if l.Value != nil &&
-								*l.Name == "mountpoint" &&
+							if l.Value != nil && *l.Name == "mountpoint" &&
 								mountPointRegexp.Match([]byte(*l.Value)) &&
-								utils.IsGreater(mountpoint, *l.Value) {
+								(mountpoint == "" || utils.IsGreater(mountpoint, *l.Value)) {
 								mountpoint = *l.Value
 							}
 						}
@@ -412,10 +411,6 @@ func (r *PVCReconciler) MonitorVolumes() {
 					// XXX support non containerd backends
 					containerIDs := []string{}
 					for i := range pod.Status.ContainerStatuses {
-						if pod.Status.ContainerStatuses[i].Name != config.Spec.ContainerName && pod.Status.ContainerStatuses[i].Name != "discoblocks-metrics" {
-							continue
-						}
-
 						containerIDs = append(containerIDs, strings.ReplaceAll(pod.Status.ContainerStatuses[i].ContainerID, "containerd://", ""))
 					}
 

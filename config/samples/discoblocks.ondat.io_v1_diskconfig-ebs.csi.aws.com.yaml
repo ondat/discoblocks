@@ -13,7 +13,6 @@ spec:
       kubernetes.io/os: linux 
   podSelector:
     discoblocks: diskconfig-sample
-  containerName: target
   policy:
     upscaleTriggerPercentage: 50
     maximumCapacityOfDisk: 2Gi

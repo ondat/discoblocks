@@ -14,8 +14,6 @@ spec:
   podSelector:
     # discoblocks: diskconfig-sample
     app: nginx
-  # containerName: target
-  containerName: nginx
   policy:
     pause: false
     upscaleTriggerPercentage: 50

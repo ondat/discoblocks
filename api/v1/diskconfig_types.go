@@ -64,10 +64,6 @@ type DiskConfigSpec struct {
 	//+kubebuilder:validation:Required
 	PodSelector map[string]string `json:"podSelector" yaml:"podSelector"`
 
-	// ContainerName is the name of target continer.
-	//+kubebuilder:validation:Required
-	ContainerName string `json:"containerName" yaml:"containerName"`
-
 	// Policy contains the disk scale policies.
 	Policy Policy `json:"policy,omitempty" yaml:"policy,omitempty"`
 }
