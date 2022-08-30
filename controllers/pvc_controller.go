@@ -377,7 +377,7 @@ func (r *PVCReconciler) MonitorVolumes() {
 					for _, m := range mf["node_filesystem_avail_bytes"].Metric {
 						for _, l := range m.Label {
 							if l.Value != nil && *l.Name == "mountpoint" &&
-								mountPointRegexp.Match([]byte(*l.Value)) &&
+								mountPointRegexp.MatchString(*l.Value) &&
 								(mountpoint == "" || utils.IsGreater(mountpoint, *l.Value)) {
 								mountpoint = *l.Value
 							}
@@ -561,8 +561,7 @@ func (r *PVCReconciler) SetupWithManager(mgr ctrl.Manager) (chan<- bool, error) 
 	closeChan := make(chan bool)
 
 	go func() {
-		// XXX back to minute
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
 
 		for {
