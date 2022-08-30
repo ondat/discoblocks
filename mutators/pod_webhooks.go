@@ -23,7 +23,7 @@ import (
 )
 
 // log is for logging in this package
-var podMutatorLog = logf.Log.WithName("PodMutator")
+var podMutatorLog = logf.Log.WithName("mutators.PodMutator")
 
 type PodMutator struct {
 	Client  client.Client

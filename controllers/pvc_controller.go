@@ -215,6 +215,19 @@ func (r *PVCReconciler) MonitorVolumes() {
 					}
 					metrics[podName] = append(metrics[podName], line)
 				}
+
+				for _, metric := range metrics[podName] {
+					mf, err := utils.ParsePrometheusMetric(metric)
+					if err != nil {
+						logger.Error(err, "Failed to parse metrics")
+						continue
+					}
+
+					if _, ok := mf["node_filesystem_avail_bytes"]; !ok {
+						logger.Error(err, "Failed to find metric", "metric", metric)
+						continue
+					}
+				}
 			}
 		}
 	}
@@ -366,7 +379,7 @@ func (r *PVCReconciler) MonitorVolumes() {
 							if l.Value != nil &&
 								*l.Name == "mountpoint" &&
 								mountPointRegexp.Match([]byte(*l.Value)) &&
-								utils.IsGreater(*l.Value, mountpoint) {
+								utils.IsGreater(mountpoint, *l.Value) {
 								mountpoint = *l.Value
 							}
 						}
@@ -377,8 +390,6 @@ func (r *PVCReconciler) MonitorVolumes() {
 						continue
 					}
 
-					println("=================================================")
-					println(mountpoint)
 					logger.Info("Mount point found", "mountpoint", mountpoint)
 
 					//nolint:govet // logger is ok to shadowing
@@ -555,7 +566,8 @@ func (r *PVCReconciler) SetupWithManager(mgr ctrl.Manager) (chan<- bool, error) 
 	closeChan := make(chan bool)
 
 	go func() {
-		ticker := time.NewTicker(time.Minute)
+		// XXX back to minute
+		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 
 		for {

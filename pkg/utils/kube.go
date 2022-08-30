@@ -55,9 +55,10 @@ metadata:
 spec:
   template:
     spec:
+      hostPID: true
       containers:
       - name: mount
-        image: nixery.dev/shell/gawk/gnugrep/mount/util-linux/coreutils-full/cri-tools
+        image: nixery.dev/shell/gawk/gnugrep/coreutils-full/cri-tools
         env:
         - name: MOUNT_ID
           value: "%s"
@@ -69,11 +70,11 @@ spec:
         - bash
         - -exc
         - |
-          DEV=$(ls /host/var/lib/storageos/volumes/ -Atr | tail -1) &&
-          mkdir -p /host/var/lib/kubelet/discoblocks/${MOUNT_ID}${MOUNT_POINT} &&
-          chroot /host mount /var/lib/storageos/volumes/${DEV} /var/lib/kubelet/discoblocks/${MOUNT_ID}${MOUNT_POINT} &&
-          DEV_MAJOR=$(cat /host/proc/self/mountinfo | grep ${DEV} | awk '{print $3}'  | awk '{split($0,a,":"); print a[1]}') &&
-          DEV_MINOR=$(cat /host/proc/self/mountinfo | grep ${DEV} | awk '{print $3}'  | awk '{split($0,a,":"); print a[2]}') &&
+          DEV=$(chroot /host ls /var/lib/storageos/volumes/ -Atr | tail -1) &&
+          chroot /host nsenter --target 1 --mount mkdir -p /var/lib/kubelet/discoblocks/${MOUNT_ID}${MOUNT_POINT} &&
+          chroot /host nsenter --target 1 --mount mount /var/lib/storageos/volumes/${DEV} /var/lib/kubelet/discoblocks/${MOUNT_ID}${MOUNT_POINT} &&
+          DEV_MAJOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV} | awk '{print $3}'  | awk '{split($0,a,":"); print a[1]}') &&
+          DEV_MINOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV} | awk '{print $3}'  | awk '{split($0,a,":"); print a[2]}') &&
           for CONTAINER_ID in ${CONTAINER_IDS}; do
             PID=$(crictl inspect --output go-template --template '{{.info.pid}}' ${CONTAINER_ID}) &&
             chroot /host nsenter --target ${PID} --mount mkdir -p ${MOUNT_POINT} /tmp${MOUNT_POINT} &&
