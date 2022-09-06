@@ -92,7 +92,7 @@ func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	case config.DeletionTimestamp != nil:
 		logger.Info("DiskConfig delete in progress")
 
-		logger.Info("Updating phase to Deleting...")
+		logger.Info("Update phase to Deleting...")
 
 		config.Status.Phase = discoblocksondatiov1.Deleting
 		if err = r.Client.Status().Update(ctx, &config); err != nil {
@@ -103,7 +103,7 @@ func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
-	logger.Info("Updating phase to Running...")
+	logger.Info("Update phase to Running...")
 
 	config.Status.Phase = discoblocksondatiov1.Running
 	if err = r.Client.Status().Update(ctx, &config); err != nil {
@@ -114,7 +114,7 @@ func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	var result ctrl.Result
 	result, err = r.reconcileUpdate(ctx, &config, logger.WithValues("mode", "update"))
 	if err == nil {
-		logger.Info("Updating phase to Ready...")
+		logger.Info("Update phase to Ready...")
 
 		config.Status.Phase = discoblocksondatiov1.Ready
 		if err = r.Client.Status().Update(ctx, &config); err != nil {
@@ -312,6 +312,17 @@ func (r *DiskConfigReconciler) reconcileUpdate(ctx context.Context, config *disc
 	return ctrl.Result{}, nil
 }
 
+// SetupWithManager sets up the controller with the Manager.
+func (r *DiskConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&discoblocksondatiov1.DiskConfig{}).
+		WithEventFilter(diskConfigEventFilter{logger: mgr.GetLogger().WithName("DiskConfigReconciler")}).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 1,
+		}).
+		Complete(r)
+}
+
 type diskConfigEventFilter struct {
 	logger logr.Logger
 }
@@ -355,15 +366,4 @@ func (ef diskConfigEventFilter) Update(e event.UpdateEvent) bool {
 
 func (ef diskConfigEventFilter) Generic(_ event.GenericEvent) bool {
 	return false
-}
-
-// SetupWithManager sets up the controller with the Manager.
-func (r *DiskConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&discoblocksondatiov1.DiskConfig{}).
-		WithEventFilter(diskConfigEventFilter{logger: mgr.GetLogger().WithName("DiskConfigReconciler")}).
-		WithOptions(controller.Options{
-			MaxConcurrentReconciles: 1,
-		}).
-		Complete(r)
 }

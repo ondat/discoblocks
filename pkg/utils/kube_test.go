@@ -19,7 +19,13 @@ func TestRenderMetricsSidecar(t *testing.T) {
 }
 
 func TestRenderMountJob(t *testing.T) {
-	_, err := RenderMountJob("name", "namespace", "mountID", "mountPoint", []string{"c1", "c2"})
+	_, err := RenderMountJob("name", "namespace", "mountID", "mountPoint", []string{"c1", "c2"}, mockGetMountCommand{})
 
 	assert.Nil(t, err, "invalid mount job template")
+}
+
+type mockGetMountCommand struct{}
+
+func (m mockGetMountCommand) GetMountCommand() (string, error) {
+	return "command", nil
 }

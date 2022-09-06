@@ -1,12 +1,11 @@
 package utils
 
 import (
-	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
-	"github.com/go-logr/logr"
 	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
 	"github.com/ondat/discoblocks/pkg/drivers"
 	batchv1 "k8s.io/api/batch/v1"
@@ -14,6 +13,11 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/yaml"
 )
+
+// Used for Yaml indentation
+const mountCommandPrefix = "\n          "
+
+var mountCommandReplacePattern = regexp.MustCompile(`\n`)
 
 // TODO on this way on case of multiple discoblocks on a pod,
 // all service would capture all disks leads to redundant data
@@ -70,17 +74,7 @@ spec:
         - bash
         - -exc
         - |
-          DEV=$(chroot /host ls /var/lib/storageos/volumes/ -Atr | tail -1) &&
-          chroot /host nsenter --target 1 --mount mkdir -p /var/lib/kubelet/discoblocks/${MOUNT_ID}${MOUNT_POINT} &&
-          chroot /host nsenter --target 1 --mount mount /var/lib/storageos/volumes/${DEV} /var/lib/kubelet/discoblocks/${MOUNT_ID}${MOUNT_POINT} &&
-          DEV_MAJOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV} | awk '{print $3}'  | awk '{split($0,a,":"); print a[1]}') &&
-          DEV_MINOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV} | awk '{print $3}'  | awk '{split($0,a,":"); print a[2]}') &&
-          for CONTAINER_ID in ${CONTAINER_IDS}; do
-            PID=$(crictl inspect --output go-template --template '{{.info.pid}}' ${CONTAINER_ID}) &&
-            chroot /host nsenter --target ${PID} --mount mkdir -p ${MOUNT_POINT} /tmp${MOUNT_POINT} &&
-            chroot /host nsenter --target ${PID} --mount mknod --mode 0600 /tmp${MOUNT_POINT}/mount b ${DEV_MAJOR} ${DEV_MINOR} &&
-            chroot /host nsenter --target ${PID} --mount mount /tmp${MOUNT_POINT}/mount ${MOUNT_POINT}
-          done
+          %s
         volumeMounts:
         - mountPath: /run/containerd/containerd.sock
           name: containerd-socket
@@ -104,7 +98,7 @@ spec:
 func RenderMetricsService(name, namespace string) (*corev1.Service, error) {
 	service := corev1.Service{}
 	if err := yaml.Unmarshal([]byte(fmt.Sprintf(metricsServiceTemplate, name, namespace)), &service); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unable to unmarshal service: %w", err)
 	}
 
 	return &service, nil
@@ -114,24 +108,38 @@ func RenderMetricsService(name, namespace string) (*corev1.Service, error) {
 func RenderMetricsSidecar() (*corev1.Container, error) {
 	sidecar := corev1.Container{}
 	if err := yaml.Unmarshal([]byte(metricsTeamplate), &sidecar); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unable to unmarshal container: %w", err)
 	}
 
 	return &sidecar, nil
 }
 
+type getMountCommand interface {
+	GetMountCommand() (string, error)
+}
+
 // RenderMountJob returns the mount job
-func RenderMountJob(name, namespace, mountID, mountPoint string, containerIDs []string) (*batchv1.Job, error) {
+func RenderMountJob(name, namespace, mountID, mountPoint string, containerIDs []string, driver getMountCommand) (*batchv1.Job, error) {
+	mountCommand, err := driver.GetMountCommand()
+	if err != nil {
+		return nil, fmt.Errorf("unable to get mount command: %w", err)
+	}
+
+	mountCommand = string(mountCommandReplacePattern.ReplaceAll([]byte(mountCommand), []byte(mountCommandPrefix)))
+
+	template := fmt.Sprintf(mountJobTemplate, name, namespace, mountID, mountPoint, strings.Join(containerIDs, " "), mountCommand)
+
 	job := batchv1.Job{}
-	if err := yaml.Unmarshal([]byte(fmt.Sprintf(mountJobTemplate, name, namespace, mountID, mountPoint, strings.Join(containerIDs, " "))), &job); err != nil {
-		return nil, err
+	if err := yaml.Unmarshal([]byte(template), &job); err != nil {
+		println(template)
+		return nil, fmt.Errorf("unable to unmarshal job: %w", err)
 	}
 
 	return &job, nil
 }
 
 // NewPVC constructs a new PVC instance
-func NewPVC(config *discoblocksondatiov1.DiskConfig, availabilityMode discoblocksondatiov1.AvailabilityMode, parentName, provisioner string, logger logr.Logger) (*corev1.PersistentVolumeClaim, error) {
+func NewPVC(config *discoblocksondatiov1.DiskConfig, availabilityMode discoblocksondatiov1.AvailabilityMode, driver *drivers.Driver) (*corev1.PersistentVolumeClaim, error) {
 	preFix := config.CreationTimestamp.String()
 	if availabilityMode == discoblocksondatiov1.ReadWriteOnce {
 		preFix = time.Now().String()
@@ -139,20 +147,11 @@ func NewPVC(config *discoblocksondatiov1.DiskConfig, availabilityMode discoblock
 
 	pvcName, err := RenderPVCName(preFix, config.Name, config.Namespace)
 	if err != nil {
-		logger.Error(err, "Unable to calculate hash")
 		return nil, fmt.Errorf("unable to calculate hash: %w", err)
-	}
-	logger = logger.WithValues("pvc_name", pvcName)
-
-	driver := drivers.GetDriver(provisioner)
-	if driver == nil {
-		logger.Info("Driver not found")
-		return nil, errors.New("driver not found: " + provisioner)
 	}
 
 	pvc, err := driver.GetPVCStub(pvcName, config.Namespace, config.Spec.StorageClassName)
 	if err != nil {
-		logger.Error(err, "Unable to init a PVC", "provisioner", provisioner)
 		return nil, fmt.Errorf("unable to init a PVC: %w", err)
 	}
 
@@ -161,13 +160,9 @@ func NewPVC(config *discoblocksondatiov1.DiskConfig, availabilityMode discoblock
 	pvc.Labels = map[string]string{
 		"discoblocks": config.Name,
 	}
-	if parentName != "" {
-		pvc.Labels["discoblocks-parent"] = parentName
-	}
 
 	capacity, err := resource.ParseQuantity(config.Spec.Capacity)
 	if err != nil {
-		logger.Error(err, "Capacity is invalid")
 		return nil, fmt.Errorf("capacity is invalid [%s]: %w", config.Spec.Capacity, err)
 	}
 
