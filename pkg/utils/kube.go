@@ -70,6 +70,8 @@ spec:
           value: "%s"
         - name: CONTAINER_IDS
           value: "%s"
+        - name: PVC_NAME
+          value: "%s"
         command:
         - bash
         - -exc
@@ -127,7 +129,7 @@ func RenderMountJob(name, namespace, mountID, mountPoint string, containerIDs []
 
 	mountCommand = string(mountCommandReplacePattern.ReplaceAll([]byte(mountCommand), []byte(mountCommandPrefix)))
 
-	template := fmt.Sprintf(mountJobTemplate, name, namespace, mountID, mountPoint, strings.Join(containerIDs, " "), mountCommand)
+	template := fmt.Sprintf(mountJobTemplate, name, namespace, mountID, mountPoint, strings.Join(containerIDs, " "), name, mountCommand)
 
 	job := batchv1.Job{}
 	if err := yaml.Unmarshal([]byte(template), &job); err != nil {
