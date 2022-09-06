@@ -186,6 +186,31 @@ func (d *Driver) GetCSIDriverDetails() (string, map[string]string, error) {
 	return string(namespace), labels, nil
 }
 
+// GetMountCommand creates a PersistentVolumeClaim for driver
+func (d *Driver) GetMountCommand() (string, error) {
+	wasiEnv, instance, err := d.init(nil)
+	if err != nil {
+		return "", fmt.Errorf("unable to init instance: %w", err)
+	}
+
+	getMountCommand, err := instance.Exports.GetRawFunction("GetMountCommand")
+	if err != nil {
+		return "", fmt.Errorf("unable to find GetMountCommand: %w", err)
+	}
+
+	_, err = getMountCommand.Native()()
+	if err != nil {
+		return "", fmt.Errorf("unable to call GetMountCommand: %w", err)
+	}
+
+	errOut := string(wasiEnv.ReadStderr())
+	if errOut != "" {
+		return "", fmt.Errorf("function error GetMountCommand: %s", errOut)
+	}
+
+	return string(wasiEnv.ReadStdout()), nil
+}
+
 func (d *Driver) init(envs map[string]string) (*wasmer.WasiEnvironment, *wasmer.Instance, error) {
 	builder := wasmer.NewWasiStateBuilder("wasi-program").
 		CaptureStdout().CaptureStderr()

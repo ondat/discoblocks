@@ -29,6 +29,23 @@ func RenderMountPoint(pattern, name string, index int) string {
 	return fmt.Sprintf(pattern, index)
 }
 
+// GetMountPointIndex calculates index by mount point
+func GetMountPointIndex(pattern, name, mountPoint string) int {
+	if mountPoint == RenderMountPoint(pattern, name, 0) {
+		return 0
+	}
+
+	const maxDisks = 500
+
+	for i := 1; i < maxDisks; i++ {
+		if mountPoint == RenderMountPoint(pattern, name, i) {
+			return i
+		}
+	}
+
+	return -1
+}
+
 // RenderFinalizer calculates finalizer name
 func RenderFinalizer(name string, extras ...string) string {
 	finalizer := fmt.Sprintf("discoblocks.io/%s", name)

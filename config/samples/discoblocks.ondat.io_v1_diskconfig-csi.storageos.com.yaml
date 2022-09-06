@@ -6,14 +6,10 @@ metadata:
 spec:
   storageClassName: storageos
   capacity: 1Gi
-  # %d is optional, but will automatically appended for second drive if missing
   availabilityMode: ReadWriteSame
-  mountPointPattern: /media/discoblocks/sample-%d
-  nodeSelector:
-    matchLabels:
-      kubernetes.io/os: linux 
+  # %d is optional, but will automatically appended for second drive if missing
+  mountPointPattern: /usr/share/nginx/html/data
   podSelector:
-    # discoblocks: diskconfig-sample
     app: nginx
   policy:
     pause: false

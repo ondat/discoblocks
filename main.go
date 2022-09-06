@@ -112,6 +112,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	nodeReconciler := &controllers.NodeReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}
+	if err = nodeReconciler.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Node")
+		os.Exit(1)
+	}
+
 	if err = (&controllers.DiskConfigReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -122,8 +131,9 @@ func main() {
 
 	// TODO close not handled
 	if _, err = (&controllers.PVCReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		NodeCache: nodeReconciler,
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "PVC")
 		os.Exit(1)
@@ -171,7 +181,7 @@ func main() {
 		os.Exit(1)
 	}()
 
-	setupLog.Info("starting manager")
+	setupLog.Info("Start manager")
 	if err = mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)

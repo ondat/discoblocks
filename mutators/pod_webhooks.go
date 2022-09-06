@@ -3,12 +3,15 @@ package mutators
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"time"
 
 	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
+	"github.com/ondat/discoblocks/pkg/drivers"
 	"github.com/ondat/discoblocks/pkg/utils"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -98,11 +101,18 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		}
 		logger = logger.WithValues("provisioner", sc.Provisioner)
 
+		driver := drivers.GetDriver(sc.Provisioner)
+		if driver == nil {
+			logger.Info("Driver not found")
+			return errorMode(http.StatusInternalServerError, "Driver not found: "+sc.Provisioner, fmt.Errorf("driver not found: %s", sc.Provisioner))
+		}
+
 		var pvc *corev1.PersistentVolumeClaim
-		pvc, err := utils.NewPVC(&config, config.Spec.AvailabilityMode, "", sc.Provisioner, logger)
+		pvc, err := utils.NewPVC(&config, config.Spec.AvailabilityMode, driver)
 		if err != nil {
 			return errorMode(http.StatusInternalServerError, err.Error(), err)
 		}
+		logger = logger.WithValues("pvc_name", pvc.Name)
 
 		pvcNamesWithMount := map[string]string{
 			pvc.Name: utils.RenderMountPoint(config.Spec.MountPointPattern, pvc.Name, 0),
@@ -125,6 +135,8 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 				}
 				pvcSelector := labels.NewSelector().Add(*label)
 
+				logger.Info("Fetch PVCs...")
+
 				pvcs := corev1.PersistentVolumeClaimList{}
 				if err = a.Client.List(ctx, &pvcs, &client.ListOptions{
 					Namespace:     config.Namespace,
@@ -138,13 +150,26 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 					return pvcs.Items[i].CreationTimestamp.UnixNano() < pvcs.Items[j].CreationTimestamp.UnixNano()
 				})
 
-				// XXX Guarantee it gets the same index, don't forget calculation by metrics
 				for i := range pvcs.Items {
 					if pvcs.Items[i].DeletionTimestamp != nil || !controllerutil.ContainsFinalizer(&pvcs.Items[i], utils.RenderFinalizer(config.Name)) {
 						continue
 					}
 
-					pvcNamesWithMount[pvcs.Items[i].Name] = utils.RenderMountPoint(config.Spec.MountPointPattern, pvcs.Items[i].Name, i+1)
+					if _, ok := pvcs.Items[i].Labels["discoblocks-index"]; !ok {
+						err = errors.New("volume index not found")
+						logger.Error(err, "Volume index not found")
+						return admission.Errored(http.StatusInternalServerError, err)
+					}
+
+					index, err := strconv.Atoi(pvcs.Items[i].Labels["discoblocks-index"])
+					if err != nil {
+						logger.Error(err, "Unable to convert index")
+						return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to convert index: %w", err))
+					}
+
+					pvcNamesWithMount[pvcs.Items[i].Name] = utils.RenderMountPoint(config.Spec.MountPointPattern, pvcs.Items[i].Name, index)
+
+					logger.Info("Volume found", "pvc_name", pvcs.Items[i].Name, "mountpoint", pvcNamesWithMount[pvcs.Items[i].Name])
 				}
 			}
 		}
