@@ -7,10 +7,10 @@ metadata:
     volume.beta.kubernetes.io/storage-provisioner: csi.storageos.com
     volume.kubernetes.io/storage-provisioner: csi.storageos.com
   finalizers:
-  - discoblocks.io/diskconfig-sample-storageos
+  - discoblocks.io/diskconfig-sample-storageos-once
   - kubernetes.io/pvc-protection
   labels:
-    discoblocks: diskconfig-sample-storageos
+    discoblocks: diskconfig-sample-storageos-once
   name: #PVC_NAME#
   namespace: default
 spec:
@@ -51,7 +51,7 @@ kind: Pod
 metadata:
   labels:
     app: nginx
-    discoblocks/metrics: diskconfig-sample-storageos
+    discoblocks/metrics: diskconfig-sample-storageos-once
   name: #POD_NAME#
   namespace: default
 spec:

@@ -1,5 +1,6 @@
 apiVersion: kuttl.dev/v1beta1
 kind: TestStep
 commands:
-  - command: kubectl apply -f diskconfig.yaml
+  - command: kubectl apply -f diskconfig-readwriteonce.yaml
+  - command: kubectl apply -f diskconfig-readwritesame.yaml
   - command: kubectl create deployment --image=nginx nginx

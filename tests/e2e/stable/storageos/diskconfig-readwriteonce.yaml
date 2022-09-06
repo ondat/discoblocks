@@ -1,12 +1,12 @@
 apiVersion: discoblocks.ondat.io/v1
 kind: DiskConfig
 metadata:
-  name: diskconfig-sample-storageos
+  name: diskconfig-sample-storageos-once
   namespace: default
 spec:
   storageClassName: storageos
   capacity: 1Gi
-  mountPointPattern: /media/discoblocks/sample-%d
+  mountPointPattern: /media/discoblocks/once-%d
   nodeSelector:
     matchLabels:
       kubernetes.io/os: linux 
