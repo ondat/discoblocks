@@ -1,5 +1,4 @@
 apiVersion: kuttl.dev/v1beta1
 kind: TestStep
 commands:
-  - command: awk '{gsub("ebs.csi.aws.com", "csi.storageos.com", $$0); print > "../../../../config/default/kustomization.yaml"}' ../../../../config/default/kustomization.yaml
   - command: sh -c 'IMG=local/discoblocks:e2e make -C ../../../.. deploy'

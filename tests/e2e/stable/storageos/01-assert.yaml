@@ -25,7 +25,7 @@ spec:
       - name: kube-rbac-proxy
       - env:
         - name: SUPPORTED_CSI_DRIVERS
-          value: csi.storageos.com
+          value: ebs.csi.aws.com,csi.storageos.com
         - name: SCHEDULER_STRICT_MODE
           value: "true"
         - name: MUTATOR_STRICT_MODE
