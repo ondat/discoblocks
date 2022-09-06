@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 	"time"
 
@@ -37,6 +38,8 @@ import (
 
 // log is for logging in this package
 var diskConfigLog = logf.Log.WithName("v1.DiskConfigWebhook")
+
+var reservedCharacters = regexp.MustCompile(`[>|<|||:|&|.|\+|\*|!|\?|\^|\$|\(|\)|\[|\]|\{|\}]`)
 
 // SetupWebhookWithManager sets up the webhook with the Manager.
 func (r *DiskConfig) SetupWebhookWithManager(mgr ctrl.Manager) error {
@@ -97,9 +100,9 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 		return errors.New("invalid new capacity, more then max")
 	}
 
-	if strings.Count(r.Spec.MountPointPattern, "%d") > 1 {
-		logger.Info("Only one %d allowed")
-		return errors.New("invalid mount pattern, only one %d allowed")
+	if err = validateMountPattern(r.Spec.MountPointPattern); err != nil {
+		logger.Info("Invalid mount pattern", "error", err.Error())
+		return err
 	}
 
 	if old != nil {
@@ -188,6 +191,18 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
 func (r *DiskConfig) ValidateDelete() error {
 	diskConfigLog.Info("validate delete", "name", r.Name)
+
+	return nil
+}
+
+func validateMountPattern(pattern string) error {
+	if strings.Count(pattern, "%d") > 1 {
+		return errors.New("invalid mount pattern, only one %d allowed")
+	}
+
+	if reservedCharacters.MatchString(pattern) {
+		return errors.New("invalid mount pattern, contains reserved characters")
+	}
 
 	return nil
 }

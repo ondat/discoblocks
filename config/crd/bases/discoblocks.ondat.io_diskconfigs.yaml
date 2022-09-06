@@ -58,9 +58,10 @@ spec:
                 type: string
               mountPointPattern:
                 default: /media/discoblocks/<name>-%d
-                description: MountPointPattern is the mount point of the disk. %d
+                description: 'MountPointPattern is the mount point of the disk. %d
                   is optional and represents disk number in order. Will be automatically
-                  appended for second drive if missing.
+                  appended for second drive if missing. Reserved characters: ><|:&.+*!?^$()[]{},
+                  only 1 %d allowed.'
                 pattern: ^/(.*)
                 type: string
               nodeSelector:
