@@ -2,7 +2,7 @@
 
 set -e
 
-if [[ -n "$(git status --short)" ]]; then
+if [[ -n "$(git status --short | grep -v "??")" ]]; then
     git stash
     function unstash() {
         git reset --hard
