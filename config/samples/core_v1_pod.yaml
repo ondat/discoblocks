@@ -3,12 +3,22 @@ kind: Pod
 metadata:
   labels:
     discoblocks: diskconfig-sample
-  name: aws-ebs-pod
+  name: diskconfig-sample
   namespace: default
 spec:
+  hostPID: true
   containers:
   - name: aws-ebs-cont
     image: alpine:3.15.4
     command:
     - sleep
     - infinity
+    volumeMounts:
+    - mountPath: /host
+      name: host
+    securityContext:
+      privileged: true
+  volumes:
+    - hostPath:
+        path: /
+      name: host

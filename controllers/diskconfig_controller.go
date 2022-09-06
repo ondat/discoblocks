@@ -348,7 +348,6 @@ func (ef diskConfigEventFilter) Update(e event.UpdateEvent) bool {
 		return false
 	}
 
-	// TODO maybe there is a mor eperformant way to compare
 	newRawSpec, err := json.Marshal(newObj.Spec)
 	if err != nil {
 		ef.logger.Error(errors.New("invalid content"), "Unable to marshal new object")

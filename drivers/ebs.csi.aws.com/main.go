@@ -45,10 +45,20 @@ func GetCSIDriverNamespace() {
 
 //export GetCSIDriverPodLabels
 func GetCSIDriverPodLabels() {
-	fmt.Fprint(os.Stdout, `{ "app.kubernetes.io/component": "ebs-csi-controller", "app.kubernetes.io/name":      "aws-ebs-csi-driver" }`)
+	fmt.Fprint(os.Stdout, `{ "app.kubernetes.io/component": "ebs-csi-controller", "app.kubernetes.io/name": "aws-ebs-csi-driver" }`)
 }
 
 //export GetMountCommand
 func GetMountCommand() {
-	fmt.Fprint(os.Stdout, ``)
+	fmt.Fprint(os.Stdout, `DEV=$(chroot /host nsenter --target 1 --mount mount | grep ${PVC_NAME}/globalmount | awk '{print $1}') &&
+chroot /host nsenter --target 1 --mount mkdir -p /var/lib/kubelet/discoblocks/${MOUNT_ID}${MOUNT_POINT} &&
+chroot /host nsenter --target 1 --mount mount ${DEV} /var/lib/kubelet/discoblocks/${MOUNT_ID}${MOUNT_POINT} &&
+DEV_MAJOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV}p1 | awk '{print $3}'  | awk '{split($0,a,":"); print a[1]}') &&
+DEV_MINOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV}p1 | awk '{print $3}'  | awk '{split($0,a,":"); print a[2]}') &&
+for CONTAINER_ID in ${CONTAINER_IDS}; do
+	PID=$(crictl inspect --output go-template --template '{{.info.pid}}' ${CONTAINER_ID}) &&
+	chroot /host nsenter --target ${PID} --mount mkdir -p ${MOUNT_POINT} /tmp${MOUNT_POINT} &&
+	chroot /host nsenter --target ${PID} --mount mknod --mode 0600 /tmp${MOUNT_POINT}/mount b ${DEV_MAJOR} ${DEV_MINOR} &&
+	chroot /host nsenter --target ${PID} --mount mount /tmp${MOUNT_POINT}/mount ${MOUNT_POINT}
+done`)
 }
