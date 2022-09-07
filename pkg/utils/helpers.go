@@ -74,14 +74,14 @@ func RenderPVCName(elems ...string) (string, error) {
 	return builder.String(), nil
 }
 
-// RenderMetricsLabel
+// RenderMetricsLabel renders metrics label
 func RenderMetricsLabel(name string) string {
 	hash, err := Hash(name)
 	if err != nil {
 		panic("Unable to calculate hash, better to say good bye!")
 	}
 
-	return fmt.Sprintf("discoblocks/metrics/%d", hash)
+	return fmt.Sprintf("discoblocks-metrics/%d", hash)
 }
 
 // IsContainsAll finds for a contains all b
