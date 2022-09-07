@@ -296,7 +296,7 @@ func (r *DiskConfigReconciler) reconcileUpdate(ctx context.Context, config *disc
 		"discoblocks": config.Name,
 	}
 	service.Spec.Selector = map[string]string{
-		"discoblocks/metrics": config.Name,
+		utils.RenderMetricsLabel(config.Name): config.Name,
 	}
 
 	logger.Info("Create Service...")
