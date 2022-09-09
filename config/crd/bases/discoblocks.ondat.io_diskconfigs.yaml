@@ -119,6 +119,16 @@ spec:
               policy:
                 description: Policy contains the disk scale policies.
                 properties:
+                  coolDown:
+                    default: 5m
+                    description: CoolDown defines temporary pause of scaling.
+                    type: string
+                  extendCapacity:
+                    default: 1Gi
+                    description: ExtendCapacity represents the capacity to extend
+                      with.
+                    pattern: ^(\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$
+                    type: string
                   maximumCapacityOfDisk:
                     default: 1000Gi
                     description: MaximumCapacityOfDisks defines maximum capacity of

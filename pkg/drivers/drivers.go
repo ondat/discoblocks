@@ -211,6 +211,56 @@ func (d *Driver) GetMountCommand() (string, error) {
 	return string(wasiEnv.ReadStdout()), nil
 }
 
+// GetResizeCommand gets resize command to execute on the host
+func (d *Driver) GetResizeCommand() (string, error) {
+	wasiEnv, instance, err := d.init(nil)
+	if err != nil {
+		return "", fmt.Errorf("unable to init instance: %w", err)
+	}
+
+	getResizeCommand, err := instance.Exports.GetRawFunction("GetResizeCommand")
+	if err != nil {
+		return "", fmt.Errorf("unable to find GetResizeCommand: %w", err)
+	}
+
+	_, err = getResizeCommand.Native()()
+	if err != nil {
+		return "", fmt.Errorf("unable to call GetResizeCommand: %w", err)
+	}
+
+	errOut := string(wasiEnv.ReadStderr())
+	if errOut != "" {
+		return "", fmt.Errorf("function error GetResizeCommand: %s", errOut)
+	}
+
+	return string(wasiEnv.ReadStdout()), nil
+}
+
+// WaitForVolumeAttachmentMeta defines wait for device info of plugin
+func (d *Driver) WaitForVolumeAttachmentMeta() (string, error) {
+	wasiEnv, instance, err := d.init(nil)
+	if err != nil {
+		return "", fmt.Errorf("unable to init instance: %w", err)
+	}
+
+	waitCommand, err := instance.Exports.GetRawFunction("WaitForVolumeAttachmentMeta")
+	if err != nil {
+		return "", fmt.Errorf("unable to find WaitForVolumeAttachmentMeta: %w", err)
+	}
+
+	_, err = waitCommand.Native()()
+	if err != nil {
+		return "", fmt.Errorf("unable to call WaitForVolumeAttachmentMeta: %w", err)
+	}
+
+	errOut := string(wasiEnv.ReadStderr())
+	if errOut != "" {
+		return "", fmt.Errorf("function error WaitForVolumeAttachmentMeta: %s", errOut)
+	}
+
+	return string(wasiEnv.ReadStdout()), nil
+}
+
 func (d *Driver) init(envs map[string]string) (*wasmer.WasiEnvironment, *wasmer.Instance, error) {
 	builder := wasmer.NewWasiStateBuilder("wasi-program").
 		CaptureStdout().CaptureStderr()

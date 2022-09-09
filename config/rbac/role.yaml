@@ -73,6 +73,9 @@ rules:
   - jobs
   verbs:
   - create
+  - delete
+  - list
+  - watch
 - apiGroups:
   - discoblocks.ondat.io
   resources:
@@ -132,3 +135,5 @@ rules:
   - volumeattachments
   verbs:
   - create
+  - list
+  - watch
