@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -55,7 +56,8 @@ type nodeCache interface {
 
 // PVCReconciler reconciles a PVC object
 type PVCReconciler struct {
-	NodeCache nodeCache
+	NodeCache  nodeCache
+	InProgress sync.Map
 	client.Client
 	Scheme *runtime.Scheme
 }
@@ -139,6 +141,7 @@ func (r *PVCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	return ctrl.Result{}, nil
 }
 
+// MonitorVolumes monitors volumes periodycally
 //nolint:gocyclo // It is complex we know
 func (r *PVCReconciler) MonitorVolumes() {
 	logger := logf.Log.WithName("VolumeMonitor")
@@ -283,6 +286,12 @@ func (r *PVCReconciler) MonitorVolumes() {
 				continue
 			}
 
+			last, loaded := r.InProgress.Load(config.Name)
+			if loaded && last.(time.Time).Add(config.Spec.Policy.CoolDown.Duration).After(time.Now()) {
+				logger.Info("Autoscaling cooldown")
+				continue
+			}
+
 			label, err := labels.NewRequirement("discoblocks", selection.Equals, []string{config.Name})
 			if err != nil {
 				logger.Error(err, "Unable to parse PVC label selector")
@@ -377,15 +386,14 @@ func (r *PVCReconciler) MonitorVolumes() {
 				continue
 			}
 
-			logger.Info("Capacities", "available", fmt.Sprintf("%.2f", available), "treshold", fmt.Sprintf("%.2f", treshold), "actual", fmt.Sprintf("%.2f", actualCapacity.AsApproximateFloat64()))
+			logger.Info("Capacities", "actual", fmt.Sprintf("%.2f", actualCapacity.AsApproximateFloat64()), "available", fmt.Sprintf("%.2f", available), "treshold", fmt.Sprintf("%.2f", treshold))
 
-			if treshold > actualCapacity.AsApproximateFloat64()-available {
+			if available > treshold {
 				logger.Info("Disk size ok")
 				continue
 			}
 
-			// TODO make it configurable
-			newCapacity, err := resource.ParseQuantity("1Gi")
+			newCapacity, err := resource.ParseQuantity(config.Spec.Policy.ExtendCapacity)
 			if err != nil {
 				logger.Error(err, "Extend capacity is invalid")
 				return
@@ -400,6 +408,16 @@ func (r *PVCReconciler) MonitorVolumes() {
 			}
 
 			logger = logger.WithValues("new_capacity", newCapacity.String(), "max_capacity", maxCapacity.String(), "no_disks", len(livePVCs), "max_disks", config.Spec.Policy.MaximumNumberOfDisks)
+
+			logger.Info("Find Node name")
+
+			nodeName := r.NodeCache.GetNodesByIP()[pod.Status.HostIP]
+			if nodeName == "" {
+				logger.Error(errors.New("node not found: "+pod.Status.HostIP), "Node not found", "IP", pod.Status.HostIP)
+				continue
+			}
+
+			logger = logger.WithValues("node_name", nodeName)
 
 			if newCapacity.Cmp(maxCapacity) == 1 {
 				if config.Spec.Policy.MaximumNumberOfDisks > 0 && len(livePVCs) >= int(config.Spec.Policy.MaximumNumberOfDisks) {
@@ -416,32 +434,36 @@ func (r *PVCReconciler) MonitorVolumes() {
 
 				logger.Info("Next index", "index", nextIndex)
 
-				// XXX support non containerd backends
 				containerIDs := []string{}
 				for i := range pod.Status.ContainerStatuses {
-					containerIDs = append(containerIDs, strings.ReplaceAll(pod.Status.ContainerStatuses[i].ContainerID, "containerd://", ""))
+					cID := pod.Status.ContainerStatuses[i].ContainerID
+					for _, prefix := range []string{"containerd://", "docker://"} {
+						cID = strings.TrimPrefix(cID, prefix)
+					}
+
+					containerIDs = append(containerIDs, cID)
 				}
 
-				logger.Info("Find Node name")
+				r.InProgress.Store(config.Name, time.Now())
 
-				nodeName := r.NodeCache.GetNodesByIP()[pod.Status.HostIP]
-				if nodeName == "" {
-					logger.Error(errors.New("node not found: "+pod.Status.HostIP), "Node not found", "IP", pod.Status.HostIP)
-					continue
-				}
-
-				r.createPVC(ctx, &config, livePVCs[0], containerIDs, nodeName, nextIndex, logger)
+				go r.createPVC(&config, livePVCs[0], containerIDs, nodeName, nextIndex, logger)
 
 				continue
 			}
 
 			logger.Info("Resize needed")
-			r.resizePVC(ctx, logger, newCapacity, lastPVC)
+
+			r.InProgress.Store(config.Name, time.Now())
+
+			go r.resizePVC(&config, newCapacity, lastPVC, nodeName, logger)
 		}
 	}
 }
 
-func (r *PVCReconciler) createPVC(ctx context.Context, config *discoblocksondatiov1.DiskConfig, parentPVC *corev1.PersistentVolumeClaim, containerIDs []string, nodeName string, nextIndex int, logger logr.Logger) {
+func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, parentPVC *corev1.PersistentVolumeClaim, containerIDs []string, nodeName string, nextIndex int, logger logr.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
 	logger.Info("Fetch StorageClass...")
 
 	sc := storagev1.StorageClass{}
@@ -485,33 +507,36 @@ func (r *PVCReconciler) createPVC(ctx context.Context, config *discoblocksondati
 		return
 	}
 
-	pvcWaitCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	waitCtx, cancel := context.WithTimeout(context.Background(), time.Hour)
 	defer cancel()
 
-WAIT:
+	logger.Info("Wait PVC...")
+
+WAIT_PVC:
 	for {
 		select {
-		case <-pvcWaitCtx.Done():
-			logger.Error(pvcWaitCtx.Err(), "PVC creation wait timeout")
+		case <-waitCtx.Done():
+			logger.Error(waitCtx.Err(), "PVC creation wait timeout")
 			return
 		default:
-			if err = r.Get(ctx, types.NamespacedName{Namespace: pvc.Namespace, Name: pvc.Name}, pvc); err == nil && pvc.Spec.VolumeName != "" {
-				break WAIT
+			if err = r.Get(ctx, types.NamespacedName{Namespace: pvc.Namespace, Name: pvc.Name}, pvc); err == nil &&
+				pvc.Spec.VolumeName != "" {
+				break WAIT_PVC
 			}
+
+			<-time.NewTicker(time.Second).C
 		}
+	}
+
+	vaName, err := utils.RenderResourceName(config.Name, pvc.Name, pvc.Namespace)
+	if err != nil {
+		logger.Error(err, "Failed to render VolumeAttachment name")
+		return
 	}
 
 	volumeAttachment := &storagev1.VolumeAttachment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: pvc.Name,
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: pvc.APIVersion,
-					Kind:       pvc.Kind,
-					Name:       pvc.Name,
-					UID:        pvc.UID,
-				},
-			},
+			Name: vaName,
 		},
 		Spec: storagev1.VolumeAttachmentSpec{
 			Attacher: sc.Provisioner,
@@ -529,15 +554,48 @@ WAIT:
 		return
 	}
 
-	mountpoint := utils.RenderMountPoint(config.Spec.MountPointPattern, config.Name, nextIndex)
-
-	mountJob, err := utils.RenderMountJob(pvc.Name, pvc.Namespace, string(pvc.UID), mountpoint, containerIDs, driver)
+	waitForMeta, err := driver.WaitForVolumeAttachmentMeta()
 	if err != nil {
-		logger.Error(err, "Unable to render mount job")
+		logger.Error(err, "Failed to call driver", "method", "WaitForVolumeAttachmentMeta")
 		return
 	}
 
-	logger.Info("Create Job", "containers", containerIDs, "mountpoint", mountpoint)
+	logger.Info("Wait VolumeAttachment...", "waitForMeta", waitForMeta)
+
+	var dev string
+WAIT_VA:
+	for {
+		select {
+		case <-waitCtx.Done():
+			logger.Error(waitCtx.Err(), "VolumeAttachment creation wait timeout")
+			return
+		default:
+			if err = r.Get(ctx, types.NamespacedName{Name: vaName}, volumeAttachment); err != nil ||
+				!volumeAttachment.Status.Attached ||
+				waitForMeta != "" && volumeAttachment.Status.AttachmentMetadata[waitForMeta] == "" {
+				<-time.NewTicker(time.Second).C
+
+				continue
+			}
+
+			dev = volumeAttachment.Status.AttachmentMetadata[waitForMeta]
+
+			break WAIT_VA
+		}
+	}
+
+	mountpoint := utils.RenderMountPoint(config.Spec.MountPointPattern, config.Name, nextIndex)
+
+	// XXX support other file systems
+	mountJob, err := utils.RenderHostJob(pvc.Name, pvc.Namespace, nodeName, dev, "ext4", mountpoint, containerIDs, driver.GetMountCommand)
+	if err != nil {
+		logger.Error(err, "Unable to render mount job")
+		return
+	} else if mountJob == nil {
+		return
+	}
+
+	logger.Info("Create mount Job", "containers", containerIDs, "mountpoint", mountpoint)
 
 	if err := r.Create(ctx, mountJob); err != nil {
 		logger.Error(err, "Failed to create mount job")
@@ -545,13 +603,87 @@ WAIT:
 	}
 }
 
-func (r *PVCReconciler) resizePVC(ctx context.Context, logger logr.Logger, capacity resource.Quantity, pvc *corev1.PersistentVolumeClaim) {
+func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capacity resource.Quantity, pvc *corev1.PersistentVolumeClaim, nodeName string, logger logr.Logger) {
 	logger.Info("Update PVC...", "capacity", capacity.AsApproximateFloat64())
 
 	pvc.Spec.Resources.Requests[corev1.ResourceStorage] = capacity
 
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
 	if err := r.Update(ctx, pvc); err != nil {
 		logger.Error(err, "Failed to update PVC")
+	}
+
+	sc := storagev1.StorageClass{}
+	if err := r.Client.Get(ctx, types.NamespacedName{Name: config.Spec.StorageClassName}, &sc); err != nil {
+		if apierrors.IsNotFound(err) {
+			logger.Error(err, "StorageClass not found", "name", config.Spec.StorageClassName)
+			return
+		}
+		logger.Error(err, "Unable to fetch StorageClass", "error", err.Error())
+		return
+	}
+	logger = logger.WithValues("provisioner", sc.Provisioner)
+
+	driver := drivers.GetDriver(sc.Provisioner)
+	if driver == nil {
+		logger.Error(errors.New("driver not found: "+sc.Provisioner), "Driver not found")
+		return
+	}
+
+	if c, err := driver.GetResizeCommand(); err != nil {
+		logger.Error(err, "Failed to call GetResizeCommand")
+		return
+	} else if c == "" {
+		return
+	}
+
+	waitForMeta, err := driver.WaitForVolumeAttachmentMeta()
+	if err != nil {
+		logger.Error(err, "Failed to call driver", "method", "WaitForVolumeAttachmentMeta")
+		return
+	}
+
+	dev := ""
+	if waitForMeta != "" {
+		volumeAttachment := &storagev1.VolumeAttachment{}
+
+		vaName, err := utils.RenderResourceName(config.Name, pvc.Name, pvc.Namespace)
+		if err != nil {
+			logger.Error(err, "Failed to render VolumeAttachment name")
+			return
+		}
+
+		logger.Info("Fetch VolumeAttachment...")
+
+		if err = r.Get(ctx, types.NamespacedName{Name: vaName}, volumeAttachment); err != nil {
+			logger.Error(err, "Failed to fetch VolumeAttachment")
+			return
+		}
+
+		if m, ok := volumeAttachment.Status.AttachmentMetadata[waitForMeta]; !ok || m == "" {
+			logger.Error(errors.New("failed to find VolumeAttachment meta"), "Failed to find VolumeAttachment meta")
+			return
+		}
+
+		dev = volumeAttachment.Status.AttachmentMetadata[waitForMeta]
+	}
+
+	// XXX support other file systems
+	resizeJob, err := utils.RenderHostJob(pvc.Name, pvc.Namespace, nodeName, dev, "ext4", "", []string{}, driver.GetResizeCommand)
+	if err != nil {
+		logger.Error(err, "Unable to render mount job")
+		return
+	} else if resizeJob == nil {
+		return
+	}
+
+	logger.Info("Create resize Job")
+
+	if err := r.Create(ctx, resizeJob); err != nil {
+		logger.Error(err, "Failed to create resize job")
+		return
 	}
 }
 
@@ -605,7 +737,7 @@ func (r *PVCReconciler) SetupWithManager(mgr ctrl.Manager) (chan<- bool, error) 
 
 	go func() {
 		// TODO make it configurable
-		ticker := time.NewTicker(time.Minute)
+		ticker := time.NewTicker(time.Minute / 2)
 		defer ticker.Stop()
 
 		for {

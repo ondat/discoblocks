@@ -22,6 +22,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -56,10 +57,10 @@ var (
 //+kubebuilder:rbac:groups=discoblocks.ondat.io,resources=diskconfigs,verbs=get;list;watch;create;update;delete
 //+kubebuilder:rbac:groups=discoblocks.ondat.io,resources=diskconfigs/status,verbs=update
 //+kubebuilder:rbac:groups=discoblocks.ondat.io,resources=diskconfigs/finalizers,verbs=update
-//+kubebuilder:rbac:groups="storage.k8s.io",resources=volumeattachments,verbs=create
+//+kubebuilder:rbac:groups="storage.k8s.io",resources=volumeattachments,verbs=create;list;watch
 //+kubebuilder:rbac:groups="storage.k8s.io",resources=storageclasses,verbs=get;update
 //+kubebuilder:rbac:groups="storage.k8s.io",resources=storageclasses/finalizers,verbs=update
-//+kubebuilder:rbac:groups="batch",resources=jobs,verbs=create
+//+kubebuilder:rbac:groups="batch",resources=jobs,verbs=create;list;watch;delete
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=services,verbs=create;update;delete
@@ -112,6 +113,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	jobReconciler := &controllers.JobReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}
+	if err = jobReconciler.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Job")
+		os.Exit(1)
+	}
+
 	nodeReconciler := &controllers.NodeReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -131,9 +141,10 @@ func main() {
 
 	// TODO close not handled
 	if _, err = (&controllers.PVCReconciler{
-		NodeCache: nodeReconciler,
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
+		NodeCache:  nodeReconciler,
+		InProgress: sync.Map{},
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "PVC")
 		os.Exit(1)

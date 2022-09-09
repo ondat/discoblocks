@@ -15,4 +15,5 @@ spec:
     upscaleTriggerPercentage: 50
     maximumCapacityOfDisk: 2Gi
     maximumNumberOfDisks: 3
+    coolDown: 20s
     pause: false
