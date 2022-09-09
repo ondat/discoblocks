@@ -15,9 +15,9 @@ import (
 )
 
 // Used for Yaml indentation
-const mountCommandPrefix = "\n          "
+const hostCommandPrefix = "\n          "
 
-var mountCommandReplacePattern = regexp.MustCompile(`\n`)
+var hostCommandReplacePattern = regexp.MustCompile(`\n`)
 
 // TODO on this way on case of multiple discoblocks on a pod,
 // all service would capture all disks leads to redundant data
@@ -50,8 +50,9 @@ command:
 - --collector.filesystem
 `
 
-// XXX replace nixery image
-const mountJobTemplate = `apiVersion: batch/v1
+// TODO replace nixery image and make sockets configurable
+// TODO make socket mounts depends on target system
+const hostJobTemplate = `apiVersion: batch/v1
 kind: Job
 metadata:
   name: "%s"
@@ -60,17 +61,20 @@ spec:
   template:
     spec:
       hostPID: true
+      nodeName: "%s"
       containers:
       - name: mount
-        image: nixery.dev/shell/gawk/gnugrep/coreutils-full/cri-tools
+        image: nixery.dev/shell/gawk/gnugrep/gnused/coreutils-full/cri-tools/docker-client
         env:
-        - name: MOUNT_ID
-          value: "%s"
         - name: MOUNT_POINT
           value: "%s"
         - name: CONTAINER_IDS
           value: "%s"
         - name: PVC_NAME
+          value: "%s"
+        - name: DEV
+          value: "%s"
+        - name: FS
           value: "%s"
         command:
         - bash
@@ -81,6 +85,9 @@ spec:
         - mountPath: /run/containerd/containerd.sock
           name: containerd-socket
           readOnly: true
+        - mountPath: /var/run/docker.sock
+          name: docker-socket
+          readOnly: true
         - mountPath: /host
           name: host
         securityContext:
@@ -90,6 +97,9 @@ spec:
        - hostPath:
           path: /run/containerd/containerd.sock
          name: containerd-socket
+       - hostPath:
+          path: /var/run/docker.sock
+         name: docker-socket
        - hostPath:
           path: /
          name: host
@@ -116,20 +126,21 @@ func RenderMetricsSidecar() (*corev1.Container, error) {
 	return &sidecar, nil
 }
 
-type getMountCommand interface {
-	GetMountCommand() (string, error)
-}
-
-// RenderMountJob returns the mount job
-func RenderMountJob(name, namespace, mountID, mountPoint string, containerIDs []string, driver getMountCommand) (*batchv1.Job, error) {
-	mountCommand, err := driver.GetMountCommand()
+// RenderHostJob returns the job executed on host
+func RenderHostJob(pvcName, namespace, nodeName, dev, fs, mountPoint string, containerIDs []string, getCommand func() (string, error)) (*batchv1.Job, error) {
+	hostCommand, err := getCommand()
 	if err != nil {
-		return nil, fmt.Errorf("unable to get mount command: %w", err)
+		return nil, fmt.Errorf("unable to get command: %w", err)
 	}
 
-	mountCommand = string(mountCommandReplacePattern.ReplaceAll([]byte(mountCommand), []byte(mountCommandPrefix)))
+	hostCommand = string(hostCommandReplacePattern.ReplaceAll([]byte(hostCommand), []byte(hostCommandPrefix)))
 
-	template := fmt.Sprintf(mountJobTemplate, name, namespace, mountID, mountPoint, strings.Join(containerIDs, " "), name, mountCommand)
+	jobName, err := RenderResourceName(fmt.Sprintf("%d", time.Now().UnixNano()), pvcName, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("unable to render resource name: %w", err)
+	}
+
+	template := fmt.Sprintf(hostJobTemplate, jobName, namespace, nodeName, mountPoint, strings.Join(containerIDs, " "), pvcName, dev, fs, hostCommand)
 
 	job := batchv1.Job{}
 	if err := yaml.Unmarshal([]byte(template), &job); err != nil {
@@ -147,7 +158,7 @@ func NewPVC(config *discoblocksondatiov1.DiskConfig, availabilityMode discoblock
 		preFix = time.Now().String()
 	}
 
-	pvcName, err := RenderPVCName(preFix, config.Name, config.Namespace)
+	pvcName, err := RenderResourceName(preFix, config.Name, config.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("unable to calculate hash: %w", err)
 	}

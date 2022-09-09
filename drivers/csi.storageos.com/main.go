@@ -52,14 +52,22 @@ func GetCSIDriverPodLabels() {
 func GetMountCommand() {
 	// TODO ls /var/lib/storageos/volumes/ -Atr is not production ready
 	fmt.Fprint(os.Stdout, `DEV=$(chroot /host ls /var/lib/storageos/volumes/ -Atr | tail -1) &&
-chroot /host nsenter --target 1 --mount mkdir -p /var/lib/kubelet/discoblocks/${MOUNT_ID}${MOUNT_POINT} &&
-chroot /host nsenter --target 1 --mount mount /var/lib/storageos/volumes/${DEV} /var/lib/kubelet/discoblocks/${MOUNT_ID}${MOUNT_POINT} &&
+chroot /host nsenter --target 1 --mount mkdir -p /var/lib/kubelet/plugins/kubernetes.io/csi/pv/${PVC_NAME} &&
+chroot /host nsenter --target 1 --mount mount /var/lib/storageos/volumes/${DEV} /var/lib/kubelet/plugins/kubernetes.io/csi/pv/${PVC_NAME} &&
 DEV_MAJOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV} | awk '{print $3}'  | awk '{split($0,a,":"); print a[1]}') &&
 DEV_MINOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV} | awk '{print $3}'  | awk '{split($0,a,":"); print a[2]}') &&
 for CONTAINER_ID in ${CONTAINER_IDS}; do
-	PID=$(crictl inspect --output go-template --template '{{.info.pid}}' ${CONTAINER_ID}) &&
-	chroot /host nsenter --target ${PID} --mount mkdir -p ${MOUNT_POINT} /tmp${MOUNT_POINT} &&
-	chroot /host nsenter --target ${PID} --mount mknod --mode 0600 /tmp${MOUNT_POINT}/mount b ${DEV_MAJOR} ${DEV_MINOR} &&
-	chroot /host nsenter --target ${PID} --mount mount /tmp${MOUNT_POINT}/mount ${MOUNT_POINT}
+	PID=$(docker inspect -f '{{.State.Pid}}' ${CONTAINER_ID} || crictl inspect --output go-template --template '{{.info.pid}}' ${CONTAINER_ID}) &&
+	chroot /host nsenter --target ${PID} --mount mkdir -p ${DEV} ${MOUNT_POINT} &&
+	chroot /host nsenter --target ${PID} --mount mknod ${DEV}/mount b ${DEV_MAJOR} ${DEV_MINOR} &&
+	chroot /host nsenter --target ${PID} --mount mount ${DEV}/mount ${MOUNT_POINT}
 done`)
+}
+
+//export GetResizeCommand
+func GetResizeCommand() {}
+
+//export WaitForVolumeAttachmentMeta
+func WaitForVolumeAttachmentMeta() {
+	fmt.Fprint(os.Stdout, "")
 }

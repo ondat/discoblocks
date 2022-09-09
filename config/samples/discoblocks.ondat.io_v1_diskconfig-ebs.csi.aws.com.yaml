@@ -6,6 +6,7 @@ metadata:
 spec:
   storageClassName: ebs-sc
   capacity: 1Gi
+  availabilityMode: ReadWriteSame
   # %d is optional, but will automatically appended for second drive if missing
   mountPointPattern: /media/discoblocks/sample-%d
   nodeSelector:
@@ -17,4 +18,5 @@ spec:
     upscaleTriggerPercentage: 50
     maximumCapacityOfDisk: 2Gi
     maximumNumberOfDisks: 3
+    coolDown: 1m
     pause: false

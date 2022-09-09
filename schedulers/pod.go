@@ -108,7 +108,7 @@ func (s *podFilter) Filter(ctx context.Context, state *framework.CycleState, pod
 
 		namespace, podLabels, err := driver.GetCSIDriverDetails()
 		if err != nil {
-			logger.Error(err, "Failed to call driver")
+			logger.Error(err, "Failed to call driver", "method", "GetCSIDriverDetails")
 			return framework.NewStatus(errorStatus, "failed to call driver: "+sc.Provisioner)
 		}
 

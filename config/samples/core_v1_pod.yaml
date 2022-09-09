@@ -6,7 +6,7 @@ metadata:
   name: diskconfig-sample
   namespace: default
 spec:
-  hostPID: true
+  # hostPID: true
   containers:
   - name: alpine
     image: alpine:3.15.4
