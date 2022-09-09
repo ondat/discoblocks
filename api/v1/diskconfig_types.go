@@ -91,6 +91,17 @@ type Policy struct {
 	//+kubebuilder:validation:Optional
 	MaximumNumberOfDisks uint8 `json:"maximumNumberOfDisks,omitempty" yaml:"maximumNumberOfDisks,omitempty"`
 
+	// ExtendCapacity represents the capacity to extend with.
+	//+kubebuilder:default:="1Gi"
+	//+kubebuilder:validation:Pattern:="^(\\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$"
+	//+kubebuilder:validation:Optional
+	ExtendCapacity string `json:"extendCapacity,omitempty" yaml:"extendCapacity,omitempty"`
+
+	// CoolDown defines temporary pause of scaling.
+	//+kubebuilder:default:="5m"
+	//+kubebuilder:validation:Optional
+	CoolDown metav1.Duration `json:"coolDown,omitempty" yaml:"coolDown,omitempty"`
+
 	// Pause disables autoscaling of disks.
 	//+kubebuilder:default:=false
 	//+kubebuilder:validation:Optional

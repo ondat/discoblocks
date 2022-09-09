@@ -13,6 +13,12 @@ func main() {}
 func IsStorageClassValid() {
 	json := []byte(os.Getenv("STORAGE_CLASS_JSON"))
 
+	if fastjson.Exists(json, "volumeBindingMode") && fastjson.GetString(json, "volumeBindingMode") != "Immediate" {
+		fmt.Fprint(os.Stderr, "only volumeBindingMode Immediate is supported")
+		fmt.Fprint(os.Stdout, false)
+		return
+	}
+
 	if !fastjson.Exists(json, "allowVolumeExpansion") || !fastjson.GetBool(json, "allowVolumeExpansion") {
 		fmt.Fprint(os.Stderr, "only allowVolumeExpansion true is supported")
 		fmt.Fprint(os.Stdout, false)
@@ -50,15 +56,33 @@ func GetCSIDriverPodLabels() {
 
 //export GetMountCommand
 func GetMountCommand() {
-	fmt.Fprint(os.Stdout, `DEV=$(chroot /host nsenter --target 1 --mount mount | grep ${PVC_NAME}/globalmount | awk '{print $1}') &&
-chroot /host nsenter --target 1 --mount mkdir -p /var/lib/kubelet/discoblocks/${MOUNT_ID}${MOUNT_POINT} &&
-chroot /host nsenter --target 1 --mount mount ${DEV} /var/lib/kubelet/discoblocks/${MOUNT_ID}${MOUNT_POINT} &&
-DEV_MAJOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV}p1 | awk '{print $3}'  | awk '{split($0,a,":"); print a[1]}') &&
-DEV_MINOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV}p1 | awk '{print $3}'  | awk '{split($0,a,":"); print a[2]}') &&
+	// XXX Double check mkfs with evey PVC options, like mount params, encryption, etc
+	fmt.Fprint(os.Stdout, `DEV=$(chroot /host nsenter --target 1 --mount readlink -f ${DEV} | sed "s|.*/||") &&
+chroot /host nsenter --target 1 --mount mkfs.${FS} /dev/${DEV} &&
+chroot /host nsenter --target 1 --mount mkdir -p /var/lib/kubelet/plugins/kubernetes.io/csi/pv/${PVC_NAME} &&
+chroot /host nsenter --target 1 --mount mount /dev/${DEV} /var/lib/kubelet/plugins/kubernetes.io/csi/pv/${PVC_NAME} &&
+DEV_MAJOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV} | awk '{print $3}'  | awk '{split($0,a,":"); print a[1]}') &&
+DEV_MINOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV} | awk '{print $3}'  | awk '{split($0,a,":"); print a[2]}') &&
 for CONTAINER_ID in ${CONTAINER_IDS}; do
-	PID=$(crictl inspect --output go-template --template '{{.info.pid}}' ${CONTAINER_ID}) &&
-	chroot /host nsenter --target ${PID} --mount mkdir -p ${MOUNT_POINT} /tmp${MOUNT_POINT} &&
-	chroot /host nsenter --target ${PID} --mount mknod --mode 0600 /tmp${MOUNT_POINT}/mount b ${DEV_MAJOR} ${DEV_MINOR} &&
-	chroot /host nsenter --target ${PID} --mount mount /tmp${MOUNT_POINT}/mount ${MOUNT_POINT}
+	PID=$(docker inspect -f '{{.State.Pid}}' ${CONTAINER_ID} || crictl inspect --output go-template --template '{{.info.pid}}' ${CONTAINER_ID}) &&
+	chroot /host nsenter --target ${PID} --mount mkdir -p /dev ${MOUNT_POINT} &&
+	chroot /host nsenter --target ${PID} --pid --mount mknod /dev/${DEV} b ${DEV_MAJOR} ${DEV_MINOR} &&
+	chroot /host nsenter --target ${PID} --mount mount /dev/${DEV} ${MOUNT_POINT}
 done`)
+}
+
+//export GetResizeCommand
+func GetResizeCommand() {
+	// 	XXX fmt.Fprint(os.Stdout, `DEV=$(chroot /host nsenter --target 1 --mount readlink -f ${DEV}) &&
+	// ([ "${FS}" = "ext3" ] && chroot /host nsenter --target 1 --mount resize2fs ${DEV}) &&
+	// ([ "${FS}" = "ext4" ] && chroot /host nsenter --target 1 --mount resize2fs ${DEV}) &&
+	// ([ "${FS}" = "xfs" ] && chroot /host nsenter --target 1 --mount xfs_growfs -d ${DEV}) &&
+	// ([ "${FS}" = "btrfs" ] && chroot /host nsenter --target 1 --mount btrfs filesystem resize max ${DEV})
+	// `)
+	fmt.Fprint(os.Stdout, `DEV=$(chroot /host nsenter --target 1 --mount readlink -f ${DEV}) && chroot /host nsenter --target 1 --mount resize2fs ${DEV}`)
+}
+
+//export WaitForVolumeAttachmentMeta
+func WaitForVolumeAttachmentMeta() {
+	fmt.Fprint(os.Stdout, "devicePath")
 }

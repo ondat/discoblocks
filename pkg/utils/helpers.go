@@ -10,6 +10,8 @@ import (
 	"github.com/prometheus/common/expfmt"
 )
 
+const maxName = 253
+
 const defaultMountPattern = "/media/discoblocks/%s-%d"
 
 // RenderMountPoint calculates mount point
@@ -57,8 +59,8 @@ func RenderFinalizer(name string, extras ...string) string {
 	return finalizer
 }
 
-// RenderPVCName calculates PVC name
-func RenderPVCName(elems ...string) (string, error) {
+// RenderResourceName calculates resource name
+func RenderResourceName(elems ...string) (string, error) {
 	builder := strings.Builder{}
 	builder.WriteString("discoblocks")
 
@@ -71,7 +73,12 @@ func RenderPVCName(elems ...string) (string, error) {
 		builder.WriteString(fmt.Sprintf("-%d", hash))
 	}
 
-	return builder.String(), nil
+	l := builder.Len()
+	if l > maxName {
+		l = maxName
+	}
+
+	return builder.String()[:l], nil
 }
 
 // RenderMetricsLabel renders metrics label

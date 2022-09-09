@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
@@ -37,6 +38,7 @@ type PodMutator struct {
 //+kubebuilder:webhook:path=/mutate-v1-pod,mutating=true,sideEffects=none,failurePolicy=fail,groups="",resources=pods,verbs=create,versions=v1,admissionReviewVersions=v1,name=mpod.kb.io
 
 // Handle pod mutation
+//nolint:gocyclo // It is complex we know
 func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	logger := podMutatorLog.WithValues("name", req.Name, "namespace", req.Namespace)
 
@@ -78,6 +80,12 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 		if !utils.IsContainsAll(pod.Labels, config.Spec.PodSelector) {
 			continue
+		}
+
+		if pod.Spec.HostPID && !config.Spec.Policy.Pause {
+			msg := "Autoscaling and Pod.Spec.HostPID are not supported together"
+			logger.Info(msg)
+			return errorMode(http.StatusBadRequest, msg, errors.New(strings.ToLower(msg)))
 		}
 
 		if pod.Labels == nil {
