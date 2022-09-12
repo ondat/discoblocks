@@ -36,6 +36,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/selection"
@@ -472,7 +473,7 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, paren
 			logger.Error(err, "StorageClass not found", "name", config.Spec.StorageClassName)
 			return
 		}
-		logger.Error(err, "Unable to fetch StorageClass", "error", err.Error())
+		logger.Error(err, "Unable to fetch StorageClass")
 		return
 	}
 	logger = logger.WithValues("provisioner", sc.Provisioner)
@@ -586,8 +587,15 @@ WAIT_VA:
 
 	mountpoint := utils.RenderMountPoint(config.Spec.MountPointPattern, config.Name, nextIndex)
 
-	// XXX support other file systems
-	mountJob, err := utils.RenderHostJob(pvc.Name, pvc.Namespace, nodeName, dev, "ext4", mountpoint, containerIDs, driver.GetMountCommand)
+	logger.Info("Determine file-system...")
+
+	fsType, err := r.determineFileSystem(ctx, pvc.Name)
+	if err != nil {
+		logger.Error(err, "Unable to determine file-system")
+		return
+	}
+
+	mountJob, err := utils.RenderHostJob(pvc.Name, pvc.Namespace, nodeName, dev, fsType, mountpoint, containerIDs, driver.GetMountCommand)
 	if err != nil {
 		logger.Error(err, "Unable to render mount job")
 		return
@@ -615,13 +623,18 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 		logger.Error(err, "Failed to update PVC")
 	}
 
+	if _, ok := pvc.Labels["discoblocks-parent"]; !ok {
+		logger.Info("Parent PVC is managed by CSI driver")
+		return
+	}
+
 	sc := storagev1.StorageClass{}
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: config.Spec.StorageClassName}, &sc); err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.Error(err, "StorageClass not found", "name", config.Spec.StorageClassName)
 			return
 		}
-		logger.Error(err, "Unable to fetch StorageClass", "error", err.Error())
+		logger.Error(err, "Unable to fetch StorageClass")
 		return
 	}
 	logger = logger.WithValues("provisioner", sc.Provisioner)
@@ -670,8 +683,15 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 		dev = volumeAttachment.Status.AttachmentMetadata[waitForMeta]
 	}
 
-	// XXX support other file systems
-	resizeJob, err := utils.RenderHostJob(pvc.Name, pvc.Namespace, nodeName, dev, "ext4", "", []string{}, driver.GetResizeCommand)
+	logger.Info("Determine file-system...")
+
+	fsType, err := r.determineFileSystem(ctx, pvc.Name)
+	if err != nil {
+		logger.Error(err, "Unable to determine file-system")
+		return
+	}
+
+	resizeJob, err := utils.RenderHostJob(pvc.Name, pvc.Namespace, nodeName, dev, fsType, "", []string{}, driver.GetResizeCommand)
 	if err != nil {
 		logger.Error(err, "Unable to render mount job")
 		return
@@ -685,6 +705,25 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 		logger.Error(err, "Failed to create resize job")
 		return
 	}
+}
+
+func (r *PVCReconciler) determineFileSystem(ctx context.Context, pvcName string) (string, error) {
+	pvList := corev1.PersistentVolumeList{}
+	if err := r.List(ctx, &pvList, &client.ListOptions{
+		FieldSelector: fields.OneTermEqualSelector("spec.claimRef.name", pvcName),
+	}); err != nil {
+		return "", fmt.Errorf("failed to list PVs: %w", err)
+	}
+
+	if len(pvList.Items) == 0 {
+		return "", errors.New("failed to find PV")
+	} else if len(pvList.Items) > 1 {
+		return "", errors.New("more than one PV attached to PVC")
+	} else if pvList.Items[0].Spec.CSI == nil {
+		return "", errors.New("unable to determine pv.spec.csi.fsType")
+	}
+
+	return pvList.Items[0].Spec.CSI.FSType, nil
 }
 
 type pvcEventFilter struct {
@@ -749,6 +788,21 @@ func (r *PVCReconciler) SetupWithManager(mgr ctrl.Manager) (chan<- bool, error) 
 			}
 		}
 	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &corev1.PersistentVolume{}, "spec.claimRef.name", func(rawObj client.Object) []string {
+		pv := rawObj.(*corev1.PersistentVolume)
+
+		if pv.Spec.ClaimRef == nil {
+			return nil
+		}
+
+		return []string{pv.Spec.ClaimRef.Name}
+	}); err != nil {
+		return nil, err
+	}
 
 	return closeChan, ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.PersistentVolumeClaim{}).

@@ -63,6 +63,7 @@ var (
 //+kubebuilder:rbac:groups="batch",resources=jobs,verbs=create;list;watch;delete
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims/finalizers,verbs=update
+//+kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=list
 //+kubebuilder:rbac:groups="",resources=services,verbs=create;update;delete
 //+kubebuilder:rbac:groups="",resources=services/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=endpoints,verbs=list;watch
