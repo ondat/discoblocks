@@ -68,7 +68,7 @@ func (ef jobEventFilter) Update(e event.UpdateEvent) bool {
 		return false
 	}
 
-	if _, ok := newObj.Labels["discoblocks"]; !ok {
+	if app, ok := newObj.Labels["app"]; !ok || app != "discoblocks" {
 		return false
 	}
 
