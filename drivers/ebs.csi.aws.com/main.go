@@ -56,7 +56,6 @@ func GetCSIDriverPodLabels() {
 
 //export GetMountCommand
 func GetMountCommand() {
-	// XXX Double check mkfs with evey PVC options, like mount params, encryption, etc
 	fmt.Fprint(os.Stdout, `DEV=$(chroot /host nsenter --target 1 --mount readlink -f ${DEV} | sed "s|.*/||") &&
 chroot /host nsenter --target 1 --mount mkfs.${FS} /dev/${DEV} &&
 chroot /host nsenter --target 1 --mount mkdir -p /var/lib/kubelet/plugins/kubernetes.io/csi/pv/${PVC_NAME} &&
@@ -73,12 +72,15 @@ done`)
 
 //export GetResizeCommand
 func GetResizeCommand() {
-	// 	XXX fmt.Fprint(os.Stdout, `DEV=$(chroot /host nsenter --target 1 --mount readlink -f ${DEV}) &&
-	// ([ "${FS}" = "ext3" ] && chroot /host nsenter --target 1 --mount resize2fs ${DEV}) &&
-	// ([ "${FS}" = "ext4" ] && chroot /host nsenter --target 1 --mount resize2fs ${DEV}) &&
-	// ([ "${FS}" = "xfs" ] && chroot /host nsenter --target 1 --mount xfs_growfs -d ${DEV}) &&
-	// ([ "${FS}" = "btrfs" ] && chroot /host nsenter --target 1 --mount btrfs filesystem resize max ${DEV})
-	// `)
+	fmt.Fprint(os.Stdout, `DEV=$(chroot /host nsenter --target 1 --mount readlink -f ${DEV}) &&
+(
+	([ "${FS}" = "ext3" ] && chroot /host nsenter --target 1 --mount resize2fs ${DEV}) ||
+	([ "${FS}" = "ext4" ] && chroot /host nsenter --target 1 --mount resize2fs ${DEV}) ||
+	([ "${FS}" = "xfs" ] && chroot /host nsenter --target 1 --mount xfs_growfs -d ${DEV}) ||
+	([ "${FS}" = "btrfs" ] && chroot /host nsenter --target 1 --mount btrfs filesystem resize max ${DEV}) ||
+	echo unsupported file-system $FS
+)
+	`)
 	fmt.Fprint(os.Stdout, `DEV=$(chroot /host nsenter --target 1 --mount readlink -f ${DEV}) && chroot /host nsenter --target 1 --mount resize2fs ${DEV}`)
 }
 
