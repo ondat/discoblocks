@@ -621,6 +621,7 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 
 	if err := r.Update(ctx, pvc); err != nil {
 		logger.Error(err, "Failed to update PVC")
+		return
 	}
 
 	if _, ok := pvc.Labels["discoblocks-parent"]; !ok {
@@ -715,11 +716,12 @@ func (r *PVCReconciler) determineFileSystem(ctx context.Context, pvcName string)
 		return "", fmt.Errorf("failed to list PVs: %w", err)
 	}
 
-	if len(pvList.Items) == 0 {
+	switch {
+	case len(pvList.Items) == 0:
 		return "", errors.New("failed to find PV")
-	} else if len(pvList.Items) > 1 {
+	case len(pvList.Items) > 1:
 		return "", errors.New("more than one PV attached to PVC")
-	} else if pvList.Items[0].Spec.CSI == nil {
+	case pvList.Items[0].Spec.CSI == nil:
 		return "", errors.New("unable to determine pv.spec.csi.fsType")
 	}
 
@@ -776,7 +778,8 @@ func (r *PVCReconciler) SetupWithManager(mgr ctrl.Manager) (chan<- bool, error) 
 
 	go func() {
 		// TODO make it configurable
-		ticker := time.NewTicker(time.Minute / 2)
+		const two = 2
+		ticker := time.NewTicker(time.Minute / two)
 		defer ticker.Stop()
 
 		for {
@@ -793,7 +796,10 @@ func (r *PVCReconciler) SetupWithManager(mgr ctrl.Manager) (chan<- bool, error) 
 	defer cancel()
 
 	if err := mgr.GetFieldIndexer().IndexField(ctx, &corev1.PersistentVolume{}, "spec.claimRef.name", func(rawObj client.Object) []string {
-		pv := rawObj.(*corev1.PersistentVolume)
+		pv, ok := rawObj.(*corev1.PersistentVolume)
+		if !ok {
+			return nil
+		}
 
 		if pv.Spec.ClaimRef == nil {
 			return nil
