@@ -57,6 +57,8 @@ kind: Job
 metadata:
   name: "%s"
   namespace: "%s"
+  labels:
+    app: discoblocks
 spec:
   template:
     spec:
