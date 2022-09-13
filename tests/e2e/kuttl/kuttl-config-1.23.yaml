@@ -6,4 +6,4 @@ kindConfig: tests/e2e/kind/kind-config-1.23.yaml
 startKIND: true
 kindContainers:
   - local/discoblocks:e2e
-timeout: 900
+timeout: 400

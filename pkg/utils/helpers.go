@@ -5,7 +5,9 @@ import (
 	"math/big"
 	"regexp"
 	"strings"
+	"time"
 
+	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 )
@@ -101,6 +103,18 @@ func IsContainsAll(a, b map[string]string) bool {
 	}
 
 	return match == len(b)
+}
+
+// GetNamePrefix returns the prefix by availability type
+func GetNamePrefix(am discoblocksondatiov1.AvailabilityMode, uniquePerConfig string) string {
+	switch am {
+	case discoblocksondatiov1.ReadWriteOnce:
+		return time.Now().String()
+	case discoblocksondatiov1.ReadWriteSame:
+		return uniquePerConfig
+	default:
+		panic("Missing availability mode implementation: " + string(am))
+	}
 }
 
 // ParsePrometheusMetric parses Prometheus metrisc details

@@ -329,14 +329,14 @@ func (r *PVCReconciler) MonitorVolumes() {
 				continue
 			}
 
-			sort.SliceStable(livePVCs, func(i, j int) bool {
+			sort.Slice(livePVCs, func(i, j int) bool {
 				return livePVCs[i].CreationTimestamp.UnixNano() < livePVCs[j].CreationTimestamp.UnixNano()
 			})
 
 			const hundred = 100
 
 			lastPVC := livePVCs[len(livePVCs)-1]
-			actualCapacity := lastPVC.Status.Capacity.Storage()
+			actualCapacity := lastPVC.Spec.Resources.Requests[corev1.ResourceStorage]
 			treshold := actualCapacity.AsApproximateFloat64() * float64(config.Spec.Policy.UpscaleTriggerPercentage) / hundred
 
 			lastDiskDetails := struct {
@@ -400,7 +400,7 @@ func (r *PVCReconciler) MonitorVolumes() {
 				return
 			}
 
-			newCapacity.Add(*actualCapacity)
+			newCapacity.Add(actualCapacity)
 
 			maxCapacity, err := resource.ParseQuantity(config.Spec.Policy.MaximumCapacityOfDisk)
 			if err != nil {
@@ -484,7 +484,9 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, paren
 		return
 	}
 
-	pvc, err := utils.NewPVC(config, discoblocksondatiov1.ReadWriteOnce, driver)
+	prefix := utils.GetNamePrefix(discoblocksondatiov1.ReadWriteOnce, "")
+
+	pvc, err := utils.NewPVC(config, prefix, driver)
 	if err != nil {
 		logger.Error(err, "Unable to construct new PVC")
 		return
@@ -795,6 +797,7 @@ func (r *PVCReconciler) SetupWithManager(mgr ctrl.Manager) (chan<- bool, error) 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
+	// TODO maybe an uncached client has better performance
 	if err := mgr.GetFieldIndexer().IndexField(ctx, &corev1.PersistentVolume{}, "spec.claimRef.name", func(rawObj client.Object) []string {
 		pv, ok := rawObj.(*corev1.PersistentVolume)
 		if !ok {

@@ -3,4 +3,4 @@ kind: TestStep
 commands:
   - command: kubectl apply -f diskconfig-readwriteonce.yaml
   - command: kubectl apply -f diskconfig-readwritesame.yaml
-  - command: kubectl create deployment --image=nginx nginx
+  - command: kubectl create deployment --image=nginx:1.23 nginx
