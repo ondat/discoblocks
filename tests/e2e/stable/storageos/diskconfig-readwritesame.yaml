@@ -3,6 +3,8 @@ kind: DiskConfig
 metadata:
   name: diskconfig-sample-storageos-same
   namespace: default
+  labels:
+    discoblocks: ok
 spec:
   storageClassName: storageos
   capacity: 1Gi
@@ -16,4 +18,5 @@ spec:
   policy:
     upscaleTriggerPercentage: 50
     maximumCapacityOfDisk: 2Gi
-    maximumNumberOfDisks: 3
+    maximumNumberOfDisks: 2
+    coolDown: 1s

@@ -15,7 +15,8 @@ spec:
   policy:
     upscaleTriggerPercentage: 50
     maximumCapacityOfDisk: 2Gi
-    maximumNumberOfDisks: 3
+    maximumNumberOfDisks: 2
+    coolDown: 1s
 ---
 apiVersion: discoblocks.ondat.io/v1
 kind: DiskConfig
@@ -35,7 +36,8 @@ spec:
   policy:
     upscaleTriggerPercentage: 50
     maximumCapacityOfDisk: 2Gi
-    maximumNumberOfDisks: 3
+    maximumNumberOfDisks: 2
+    coolDown: 1s
 ---
 apiVersion: apps/v1
 kind: Deployment

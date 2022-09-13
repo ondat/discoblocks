@@ -1,0 +1,5 @@
+apiVersion: kuttl.dev/v1beta1
+kind: TestStep
+commands:
+  - command: sh -c "kubectl exec $(kubectl get po | tail -1 | awk '{print $1}') -- ls -l /media/discoblocks/same-0/data0"
+  - command: sh -c "kubectl exec $(kubectl get po | tail -1 | awk '{print $1}') -- ls -l /media/discoblocks/same-1/data1"

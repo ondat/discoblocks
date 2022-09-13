@@ -115,8 +115,10 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 			return errorMode(http.StatusInternalServerError, "Driver not found: "+sc.Provisioner, fmt.Errorf("driver not found: %s", sc.Provisioner))
 		}
 
+		prefix := utils.GetNamePrefix(config.Spec.AvailabilityMode, config.CreationTimestamp.String())
+
 		var pvc *corev1.PersistentVolumeClaim
-		pvc, err := utils.NewPVC(&config, config.Spec.AvailabilityMode, driver)
+		pvc, err := utils.NewPVC(&config, prefix, driver)
 		if err != nil {
 			return errorMode(http.StatusInternalServerError, err.Error(), err)
 		}
@@ -135,7 +137,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 			logger.Info("PVC already exists")
 
-			if config.Spec.AvailabilityMode == discoblocksondatiov1.ReadWriteSame {
+			if config.Spec.AvailabilityMode != discoblocksondatiov1.ReadWriteOnce {
 				label, err := labels.NewRequirement("discoblocks-parent", selection.Equals, []string{pvc.Name})
 				if err != nil {
 					logger.Error(err, "Unable to parse PVC label selector")
@@ -154,7 +156,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 					return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to fetch PVCs: %w", err))
 				}
 
-				sort.SliceStable(pvcs.Items, func(i, j int) bool {
+				sort.Slice(pvcs.Items, func(i, j int) bool {
 					return pvcs.Items[i].CreationTimestamp.UnixNano() < pvcs.Items[j].CreationTimestamp.UnixNano()
 				})
 

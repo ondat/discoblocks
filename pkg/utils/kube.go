@@ -154,13 +154,8 @@ func RenderHostJob(pvcName, namespace, nodeName, dev, fs, mountPoint string, con
 }
 
 // NewPVC constructs a new PVC instance
-func NewPVC(config *discoblocksondatiov1.DiskConfig, availabilityMode discoblocksondatiov1.AvailabilityMode, driver *drivers.Driver) (*corev1.PersistentVolumeClaim, error) {
-	preFix := config.CreationTimestamp.String()
-	if availabilityMode == discoblocksondatiov1.ReadWriteOnce {
-		preFix = time.Now().String()
-	}
-
-	pvcName, err := RenderResourceName(preFix, config.Name, config.Namespace)
+func NewPVC(config *discoblocksondatiov1.DiskConfig, prefix string, driver *drivers.Driver) (*corev1.PersistentVolumeClaim, error) {
+	pvcName, err := RenderResourceName(prefix, config.Name, config.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("unable to calculate hash: %w", err)
 	}
