@@ -28,7 +28,6 @@ import (
 	"golang.org/x/net/context"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -78,29 +77,12 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 		return errors.New("invalid StorageClass name")
 	}
 
-	if _, err := resource.ParseQuantity(r.Spec.Policy.MaximumCapacityOfDisk); err != nil {
-		logger.Info("Max capacity is invalid")
-		return errors.New("invalid max capacity")
-	}
-
-	newCapacity, err := resource.ParseQuantity(r.Spec.Capacity)
-	if err != nil {
-		logger.Info("Capacity is invalid")
-		return errors.New("invalid new capacity")
-	}
-
-	maxCapacity, err := resource.ParseQuantity(r.Spec.Policy.MaximumCapacityOfDisk)
-	if err != nil {
-		logger.Info("Max capacity is invalid")
-		return errors.New("invalid max capacity")
-	}
-
-	if maxCapacity.CmpInt64(0) != 0 && maxCapacity.Cmp(newCapacity) == -1 {
+	if r.Spec.Policy.MaximumCapacityOfDisk.CmpInt64(0) != 0 && r.Spec.Policy.MaximumCapacityOfDisk.Cmp(r.Spec.Capacity) == -1 {
 		logger.Info("Capacity is more then max")
 		return errors.New("invalid new capacity, more then max")
 	}
 
-	if err = validateMountPattern(r.Spec.MountPointPattern); err != nil {
+	if err := validateMountPattern(r.Spec.MountPointPattern); err != nil {
 		logger.Info("Invalid mount pattern", "error", err.Error())
 		return err
 	}
@@ -108,7 +90,7 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 	if old != nil {
 		oldDC, ok := old.(*DiskConfig)
 		if !ok {
-			err = errors.New("invalid old object")
+			err := errors.New("invalid old object")
 			logger.Error(err, "this should not happen")
 			return err
 		}
@@ -128,15 +110,7 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 			return errors.New("mount point pattern is immutable field")
 		}
 
-		var oldCapacity resource.Quantity
-		oldCapacity, err = resource.ParseQuantity(oldDC.Spec.Capacity)
-		if err != nil {
-			err = errors.New("invalid old capacity")
-			logger.Error(err, "this should not happen")
-			return err
-		}
-
-		if oldCapacity.CmpInt64(0) != 0 && oldCapacity.Cmp(newCapacity) == 1 {
+		if oldDC.Spec.Capacity.CmpInt64(0) != 0 && oldDC.Spec.Capacity.Cmp(r.Spec.Capacity) == 1 {
 			logger.Info("Shrinking disk is not supported")
 			return errors.New("shrinking disk is not supported")
 		}
@@ -153,7 +127,7 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 	logger.Info("Fetch StorageClass...")
 
 	sc := storagev1.StorageClass{}
-	if err = diskConfigWebhookDependencies.client.Get(ctx, types.NamespacedName{Name: r.Spec.StorageClassName}, &sc); err != nil {
+	if err := diskConfigWebhookDependencies.client.Get(ctx, types.NamespacedName{Name: r.Spec.StorageClassName}, &sc); err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.Info("StorageClass not found")
 		} else {

@@ -394,21 +394,10 @@ func (r *PVCReconciler) MonitorVolumes() {
 				continue
 			}
 
-			newCapacity, err := resource.ParseQuantity(config.Spec.Policy.ExtendCapacity)
-			if err != nil {
-				logger.Error(err, "Extend capacity is invalid")
-				return
-			}
-
+			newCapacity := config.Spec.Policy.ExtendCapacity
 			newCapacity.Add(actualCapacity)
 
-			maxCapacity, err := resource.ParseQuantity(config.Spec.Policy.MaximumCapacityOfDisk)
-			if err != nil {
-				logger.Error(err, "Max capacity is invalid")
-				continue
-			}
-
-			logger = logger.WithValues("new_capacity", newCapacity.String(), "max_capacity", maxCapacity.String(), "no_disks", len(livePVCs), "max_disks", config.Spec.Policy.MaximumNumberOfDisks)
+			logger = logger.WithValues("new_capacity", newCapacity.String(), "max_capacity", config.Spec.Policy.MaximumCapacityOfDisk.String(), "no_disks", len(livePVCs), "max_disks", config.Spec.Policy.MaximumNumberOfDisks)
 
 			logger.Info("Find Node name")
 
@@ -420,7 +409,7 @@ func (r *PVCReconciler) MonitorVolumes() {
 
 			logger = logger.WithValues("node_name", nodeName)
 
-			if newCapacity.Cmp(maxCapacity) == 1 {
+			if newCapacity.Cmp(config.Spec.Policy.MaximumCapacityOfDisk) == 1 {
 				if config.Spec.Policy.MaximumNumberOfDisks > 0 && len(livePVCs) >= int(config.Spec.Policy.MaximumNumberOfDisks) {
 					logger.Info("Already maximum number of disks", "number", config.Spec.Policy.MaximumNumberOfDisks)
 					continue

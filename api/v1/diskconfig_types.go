@@ -18,6 +18,7 @@ package v1
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -35,9 +36,8 @@ type DiskConfigSpec struct {
 
 	// Capacity represents the desired capacity of the underlying volume.
 	//+kubebuilder:default:="1Gi"
-	//+kubebuilder:validation:Pattern:="^(\\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$"
 	//+kubebuilder:validation:Optional
-	Capacity string `json:"capacity,omitempty" yaml:"capacity,omitempty"`
+	Capacity resource.Quantity `json:"capacity,omitempty" yaml:"capacity,omitempty"`
 
 	// MountPointPattern is the mount point of the disk. %d is optional and represents disk number in order. Will be automatically appended for second drive if missing.
 	// Reserved characters: ><|:&.+*!?^$()[]{}, only 1 %d allowed.
@@ -79,10 +79,9 @@ type Policy struct {
 	UpscaleTriggerPercentage uint8 `json:"upscaleTriggerPercentage,omitempty" yaml:"upscaleTriggerPercentage,omitempty"`
 
 	// MaximumCapacityOfDisks defines maximum capacity of a disk.
-	//+kubebuilder:validation:Pattern:="^(\\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$"
 	//+kubebuilder:default:="1000Gi"
 	//+kubebuilder:validation:Optional
-	MaximumCapacityOfDisk string `json:"maximumCapacityOfDisk,omitempty" yaml:"maximumCapacityOfDisk,omitempty"`
+	MaximumCapacityOfDisk resource.Quantity `json:"maximumCapacityOfDisk,omitempty" yaml:"maximumCapacityOfDisk,omitempty"`
 
 	// MaximumCapacityOfDisks defines maximum number of a disks.
 	//+kubebuilder:default:=1
@@ -93,9 +92,8 @@ type Policy struct {
 
 	// ExtendCapacity represents the capacity to extend with.
 	//+kubebuilder:default:="1Gi"
-	//+kubebuilder:validation:Pattern:="^(\\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$"
 	//+kubebuilder:validation:Optional
-	ExtendCapacity string `json:"extendCapacity,omitempty" yaml:"extendCapacity,omitempty"`
+	ExtendCapacity resource.Quantity `json:"extendCapacity,omitempty" yaml:"extendCapacity,omitempty"`
 
 	// CoolDown defines temporary pause of scaling.
 	//+kubebuilder:default:="5m"
