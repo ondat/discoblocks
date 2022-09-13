@@ -51,11 +51,14 @@ spec:
                 - ReadWriteOnce
                 type: string
               capacity:
+                anyOf:
+                - type: integer
+                - type: string
                 default: 1Gi
                 description: Capacity represents the desired capacity of the underlying
                   volume.
-                pattern: ^(\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$
-                type: string
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
               mountPointPattern:
                 default: /media/discoblocks/<name>-%d
                 description: 'MountPointPattern is the mount point of the disk. %d
@@ -124,17 +127,23 @@ spec:
                     description: CoolDown defines temporary pause of scaling.
                     type: string
                   extendCapacity:
+                    anyOf:
+                    - type: integer
+                    - type: string
                     default: 1Gi
                     description: ExtendCapacity represents the capacity to extend
                       with.
-                    pattern: ^(\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$
-                    type: string
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
                   maximumCapacityOfDisk:
+                    anyOf:
+                    - type: integer
+                    - type: string
                     default: 1000Gi
                     description: MaximumCapacityOfDisks defines maximum capacity of
                       a disk.
-                    pattern: ^(\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$
-                    type: string
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
                   maximumNumberOfDisks:
                     default: 1
                     description: MaximumCapacityOfDisks defines maximum number of

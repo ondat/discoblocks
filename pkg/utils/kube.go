@@ -10,7 +10,6 @@ import (
 	"github.com/ondat/discoblocks/pkg/drivers"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/yaml"
 )
 
@@ -171,14 +170,9 @@ func NewPVC(config *discoblocksondatiov1.DiskConfig, prefix string, driver *driv
 		"discoblocks": config.Name,
 	}
 
-	capacity, err := resource.ParseQuantity(config.Spec.Capacity)
-	if err != nil {
-		return nil, fmt.Errorf("capacity is invalid [%s]: %w", config.Spec.Capacity, err)
-	}
-
 	pvc.Spec.Resources = corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{
-			corev1.ResourceStorage: capacity,
+			corev1.ResourceStorage: config.Spec.Capacity,
 		},
 	}
 
