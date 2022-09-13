@@ -115,6 +115,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 			return errorMode(http.StatusInternalServerError, "Driver not found: "+sc.Provisioner, fmt.Errorf("driver not found: %s", sc.Provisioner))
 		}
 
+		// TODO support daemonsets
 		prefix := utils.GetNamePrefix(config.Spec.AvailabilityMode, config.CreationTimestamp.String())
 
 		var pvc *corev1.PersistentVolumeClaim
