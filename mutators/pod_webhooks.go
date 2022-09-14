@@ -17,6 +17,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
@@ -91,7 +92,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		if pod.Labels == nil {
 			pod.Labels = map[string]string{}
 		}
-		pod.Labels[utils.RenderMetricsLabel(config.Name)] = config.Name
+		pod.Labels[utils.RenderMetricsLabel(pod.Name)] = pod.Name
 
 		logger := logger.WithValues("name", config.Name, "sc_name", config.Spec.StorageClassName)
 		logger.Info("Attach volume to workload...")
@@ -115,7 +116,6 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 			return errorMode(http.StatusInternalServerError, "Driver not found: "+sc.Provisioner, fmt.Errorf("driver not found: %s", sc.Provisioner))
 		}
 
-		// TODO support daemonsets
 		prefix := utils.GetNamePrefix(config.Spec.AvailabilityMode, config.CreationTimestamp.String())
 
 		var pvc *corev1.PersistentVolumeClaim
@@ -230,6 +230,37 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 				MountPath: mp,
 			})
 		}
+	}
+
+	service, err := utils.RenderMetricsService(pod.Name, pod.Namespace)
+	if err != nil {
+		logger.Error(err, "Failed to render Service")
+		return errorMode(http.StatusInternalServerError, "Unable to render Service", fmt.Errorf("unable to render Service: %w", err))
+	}
+
+	service.Labels = map[string]string{
+		"discoblocks": pod.Name,
+	}
+	service.Spec.Selector = map[string]string{
+		utils.RenderMetricsLabel(pod.Name): pod.Name,
+	}
+	service.OwnerReferences = []metav1.OwnerReference{
+		{
+			APIVersion: pod.APIVersion,
+			Kind:       pod.Kind,
+			Name:       pod.Name,
+			UID:        pod.UID,
+		},
+	}
+
+	logger.Info("Create Service...")
+	if err = a.Client.Create(ctx, service); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			logger.Info("Failed to create Service", "error", err.Error())
+			return errorMode(http.StatusInternalServerError, "Unable to create Service", fmt.Errorf("unable to create Service: %w", err))
+		}
+
+		logger.Error(errors.New("service already exists"), "Service already exists")
 	}
 
 	marshaledPod, err := json.Marshal(pod)

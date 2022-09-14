@@ -154,28 +154,6 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 
 	finalizer := utils.RenderFinalizer(configName)
 
-	logger.Info("Delete Service...")
-
-	service := corev1.Service{}
-	if err := r.Get(ctx, types.NamespacedName{Name: configName, Namespace: configNamespace}, &service); err != nil && !apierrors.IsNotFound(err) {
-		logger.Info("Unable to fetch Service", "error", err.Error())
-		return ctrl.Result{}, fmt.Errorf("unable to fetch Service: %w", err)
-	} else if err == nil {
-		if controllerutil.ContainsFinalizer(&service, finalizer) {
-			controllerutil.RemoveFinalizer(&service, finalizer)
-
-			if err = r.Client.Update(ctx, &service); err != nil {
-				logger.Info("Unable to update Service", "error", err.Error())
-				return ctrl.Result{}, fmt.Errorf("unable to update Service: %w", err)
-			}
-		}
-
-		if err = r.Client.Delete(ctx, &service); err != nil {
-			logger.Info("Unable to delete Service", "error", err.Error())
-			return ctrl.Result{}, fmt.Errorf("unable to delete Service: %w", err)
-		}
-	}
-
 	logger.Info("Update PVCs...")
 
 	sem := utils.CreateSemaphore(concurrency, time.Nanosecond)
@@ -222,7 +200,6 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 
 			if controllerutil.ContainsFinalizer(&pvcList.Items[i], finalizer) {
 				controllerutil.RemoveFinalizer(&pvcList.Items[i], finalizer)
-
 				logger := logger.WithValues("pvc_name", pvcList.Items[i].Name, "pvc_namespace", pvcList.Items[i].Namespace)
 				logger.Info("Update PVC finalizer...", "finalizer", finalizer)
 
@@ -262,7 +239,6 @@ func (r *DiskConfigReconciler) reconcileUpdate(ctx context.Context, config *disc
 	sc := storagev1.StorageClass{}
 	if err := r.Get(ctx, types.NamespacedName{Name: config.Spec.StorageClassName}, &sc); err != nil {
 		if apierrors.IsNotFound(err) {
-			// TODO create default storageclass
 			logger.Info("StorageClass not found")
 			return ctrl.Result{RequeueAfter: time.Minute}, nil
 		}
@@ -283,30 +259,6 @@ func (r *DiskConfigReconciler) reconcileUpdate(ctx context.Context, config *disc
 			logger.Info("Failed to update StorageClass", "error", err.Error())
 			return ctrl.Result{}, fmt.Errorf("unable to update StorageClass: %w", err)
 		}
-	}
-
-	service, err := utils.RenderMetricsService(config.Name, config.Namespace)
-	if err != nil {
-		logger.Error(err, "Failed to render Service")
-		return ctrl.Result{}, fmt.Errorf("unable to render Service: %w", err)
-	}
-
-	controllerutil.AddFinalizer(service, utils.RenderFinalizer(config.Name))
-	service.Labels = map[string]string{
-		"discoblocks": config.Name,
-	}
-	service.Spec.Selector = map[string]string{
-		utils.RenderMetricsLabel(config.Name): config.Name,
-	}
-
-	logger.Info("Create Service...")
-	if err = r.Client.Create(ctx, service); err != nil {
-		if !apierrors.IsAlreadyExists(err) {
-			logger.Info("Failed to create Service", "error", err.Error())
-			return ctrl.Result{}, fmt.Errorf("unable to create Service: %w", err)
-		}
-
-		logger.Info("Service already exists")
 	}
 
 	return ctrl.Result{}, nil

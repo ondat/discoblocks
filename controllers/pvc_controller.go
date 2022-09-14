@@ -49,8 +49,6 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// TODO produce metrics of the operations below (and everywhere), included error by type and success ratio
-
 type nodeCache interface {
 	GetNodesByIP() map[string]string
 }
@@ -128,8 +126,6 @@ func (r *PVCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		config.Status.PersistentVolumeClaims[pvc.Name] = pvc.Status.Phase
 	}
 
-	// TODO update conditions
-
 	logger.Info("Update DiskConfig status...")
 
 	if err := r.Client.Status().Update(ctx, &config); err != nil {
@@ -177,8 +173,6 @@ func (r *PVCReconciler) MonitorVolumes() {
 			continue
 		}
 
-		// TODO detect not managed, finalizer like PVC if possible
-
 		for _, ss := range endpoints.Items[i].Subsets {
 			for _, ip := range ss.Addresses {
 				podName := types.NamespacedName{Namespace: ip.TargetRef.Namespace, Name: ip.TargetRef.Name}
@@ -190,7 +184,6 @@ func (r *PVCReconciler) MonitorVolumes() {
 
 				logger := logger.WithValues("pod_name", podName.String(), "ep_name", endpoints.Items[i].Name, "IP", ip.IP)
 
-				// TODO https support would be nice
 				req, err := http.NewRequest("GET", fmt.Sprintf("http://%s:9100/metrics", ip.IP), http.NoBody)
 				if err != nil {
 					logger.Error(err, "Request error")
@@ -485,12 +478,14 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, paren
 	pvc.Labels["discoblocks-parent"] = parentPVC.Name
 	pvc.Labels["discoblocks-index"] = fmt.Sprintf("%d", nextIndex)
 
-	pvc.OwnerReferences = append(pvc.OwnerReferences, metav1.OwnerReference{
-		APIVersion: parentPVC.APIVersion,
-		Kind:       parentPVC.Kind,
-		Name:       parentPVC.Name,
-		UID:        parentPVC.UID,
-	})
+	pvc.OwnerReferences = []metav1.OwnerReference{
+		{
+			APIVersion: parentPVC.APIVersion,
+			Kind:       parentPVC.Kind,
+			Name:       parentPVC.Name,
+			UID:        parentPVC.UID,
+		},
+	}
 
 	logger.Info("Create PVC...")
 
@@ -526,9 +521,27 @@ WAIT_PVC:
 		return
 	}
 
+	logger.Info("Find PersistentVolume...")
+
+	pv, err := r.getPersistentVolume(ctx, pvc.Name)
+	if err != nil {
+		logger.Error(err, "Failed to find PersistentVolume")
+		return
+	} else if pv.Spec.CSI == nil {
+		logger.Error(err, "Failed to find pv.spec.csi")
+		return
+	}
+
 	volumeAttachment := &storagev1.VolumeAttachment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: vaName,
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: pv.APIVersion,
+					Kind:       pv.Kind,
+					Name:       pv.Name,
+				},
+			},
 		},
 		Spec: storagev1.VolumeAttachmentSpec{
 			Attacher: sc.Provisioner,
@@ -578,15 +591,7 @@ WAIT_VA:
 
 	mountpoint := utils.RenderMountPoint(config.Spec.MountPointPattern, config.Name, nextIndex)
 
-	logger.Info("Determine file-system...")
-
-	fsType, err := r.determineFileSystem(ctx, pvc.Name)
-	if err != nil {
-		logger.Error(err, "Unable to determine file-system")
-		return
-	}
-
-	mountJob, err := utils.RenderHostJob(pvc.Name, pvc.Namespace, nodeName, dev, fsType, mountpoint, containerIDs, driver.GetMountCommand)
+	mountJob, err := utils.RenderHostJob(pvc.Name, pvc.Namespace, nodeName, dev, pv.Spec.CSI.FSType, mountpoint, containerIDs, driver.GetMountCommand)
 	if err != nil {
 		logger.Error(err, "Unable to render mount job")
 		return
@@ -677,13 +682,18 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 
 	logger.Info("Determine file-system...")
 
-	fsType, err := r.determineFileSystem(ctx, pvc.Name)
+	logger.Info("Find PersistentVolume...")
+
+	pv, err := r.getPersistentVolume(ctx, pvc.Name)
 	if err != nil {
-		logger.Error(err, "Unable to determine file-system")
+		logger.Error(err, "Failed to find PersistentVolume")
+		return
+	} else if pv.Spec.CSI == nil {
+		logger.Error(err, "Failed to find pv.spec.csi")
 		return
 	}
 
-	resizeJob, err := utils.RenderHostJob(pvc.Name, pvc.Namespace, nodeName, dev, fsType, "", []string{}, driver.GetResizeCommand)
+	resizeJob, err := utils.RenderHostJob(pvc.Name, pvc.Namespace, nodeName, dev, pv.Spec.CSI.FSType, "", []string{}, driver.GetResizeCommand)
 	if err != nil {
 		logger.Error(err, "Unable to render mount job")
 		return
@@ -699,24 +709,22 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 	}
 }
 
-func (r *PVCReconciler) determineFileSystem(ctx context.Context, pvcName string) (string, error) {
+func (r *PVCReconciler) getPersistentVolume(ctx context.Context, pvcName string) (*corev1.PersistentVolume, error) {
 	pvList := corev1.PersistentVolumeList{}
 	if err := r.List(ctx, &pvList, &client.ListOptions{
 		FieldSelector: fields.OneTermEqualSelector("spec.claimRef.name", pvcName),
 	}); err != nil {
-		return "", fmt.Errorf("failed to list PVs: %w", err)
+		return nil, fmt.Errorf("failed to list PVs: %w", err)
 	}
 
 	switch {
 	case len(pvList.Items) == 0:
-		return "", errors.New("failed to find PV")
+		return nil, errors.New("failed to find PV")
 	case len(pvList.Items) > 1:
-		return "", errors.New("more than one PV attached to PVC")
-	case pvList.Items[0].Spec.CSI == nil:
-		return "", errors.New("unable to determine pv.spec.csi.fsType")
+		return nil, errors.New("more than one PV attached to PVC")
 	}
 
-	return pvList.Items[0].Spec.CSI.FSType, nil
+	return &pvList.Items[0], nil
 }
 
 type pvcEventFilter struct {
@@ -768,7 +776,6 @@ func (r *PVCReconciler) SetupWithManager(mgr ctrl.Manager) (chan<- bool, error) 
 	closeChan := make(chan bool)
 
 	go func() {
-		// TODO make it configurable
 		const two = 2
 		ticker := time.NewTicker(time.Minute / two)
 		defer ticker.Stop()
@@ -786,7 +793,6 @@ func (r *PVCReconciler) SetupWithManager(mgr ctrl.Manager) (chan<- bool, error) 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	// TODO maybe an uncached client has better performance
 	if err := mgr.GetFieldIndexer().IndexField(ctx, &corev1.PersistentVolume{}, "spec.claimRef.name", func(rawObj client.Object) []string {
 		pv, ok := rawObj.(*corev1.PersistentVolume)
 		if !ok {

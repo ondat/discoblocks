@@ -18,8 +18,6 @@ const hostCommandPrefix = "\n          "
 
 var hostCommandReplacePattern = regexp.MustCompile(`\n`)
 
-// TODO on this way on case of multiple discoblocks on a pod,
-// all service would capture all disks leads to redundant data
 const metricsServiceTemplate = `kind: Service
 apiVersion: v1
 metadata:
@@ -37,7 +35,6 @@ spec:
     targetPort: 9100
 `
 
-// TODO limit filesystem reports to discoblocks (ignored-mount-points)
 const metricsTeamplate = `name: discoblocks-metrics
 image: bitnami/node-exporter:1.3.1
 ports:
@@ -49,8 +46,6 @@ command:
 - --collector.filesystem
 `
 
-// TODO replace nixery image and make sockets configurable
-// TODO make socket mounts depends on target system
 const hostJobTemplate = `apiVersion: batch/v1
 kind: Job
 metadata:

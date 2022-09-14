@@ -50,7 +50,6 @@ func GetCSIDriverPodLabels() {
 
 //export GetMountCommand
 func GetMountCommand() {
-	// TODO ls /var/lib/storageos/volumes/ -Atr is not production ready
 	fmt.Fprint(os.Stdout, `DEV=$(chroot /host ls /var/lib/storageos/volumes/ -Atr | tail -1) &&
 chroot /host nsenter --target 1 --mount mkdir -p /var/lib/kubelet/plugins/kubernetes.io/csi/pv/${PVC_NAME} &&
 chroot /host nsenter --target 1 --mount mount /var/lib/storageos/volumes/${DEV} /var/lib/kubelet/plugins/kubernetes.io/csi/pv/${PVC_NAME} &&
