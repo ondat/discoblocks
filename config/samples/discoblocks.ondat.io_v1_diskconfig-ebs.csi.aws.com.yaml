@@ -13,7 +13,8 @@ spec:
     matchLabels:
       kubernetes.io/os: linux 
   podSelector:
-    discoblocks: diskconfig-sample
+    # discoblocks: diskconfig-sample
+    app: nginx
   policy:
     upscaleTriggerPercentage: 50
     maximumCapacityOfDisk: 2Gi
