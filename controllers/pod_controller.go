@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/ondat/discoblocks/pkg/utils"
@@ -36,6 +37,17 @@ type PodReconciler struct {
 func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx).WithName("PodReconciler").WithValues("name", req.Name, "namespace", req.Name)
 
+	pod := &corev1.Pod{}
+	if err := r.Client.Get(ctx, types.NamespacedName{Name: req.Name, Namespace: req.Namespace}, pod); err != nil {
+		if apierrors.IsNotFound(err) {
+			logger.Error(err, "Failed to find Pod")
+			return ctrl.Result{}, nil
+		}
+
+		logger.Error(err, "Failed to get Pod")
+		return ctrl.Result{}, err
+	}
+
 	serviceName, err := utils.RenderResourceName(true, req.Name, req.Namespace)
 	if err != nil {
 		logger.Error(err, "Failed to render resource name")
@@ -48,23 +60,15 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, nil
 	}
 
-	service.Labels = map[string]string{
-		"discoblocks": req.Name,
+	service.Labels = map[string]string{}
+	for k, v := range pod.Labels {
+		if strings.HasPrefix(k, "discoblocks/") {
+			service.Labels[k] = v
+		}
 	}
 
 	service.Spec.Selector = map[string]string{
 		"discoblocks-metrics": req.Name,
-	}
-
-	pod := &corev1.Pod{}
-	if err = r.Client.Get(ctx, types.NamespacedName{Name: req.Name, Namespace: req.Namespace}, pod); err != nil {
-		if apierrors.IsNotFound(err) {
-			logger.Error(err, "Failed to find Pod")
-			return ctrl.Result{}, nil
-		}
-
-		logger.Error(err, "Failed to get Pod")
-		return ctrl.Result{}, err
 	}
 
 	service.OwnerReferences = []metav1.OwnerReference{

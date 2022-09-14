@@ -93,6 +93,16 @@ func RenderResourceName(prefix bool, elems ...string) (string, error) {
 	return builder.String()[:l], nil
 }
 
+// RenderDiskConfigLabel renders DiskConfig label
+func RenderDiskConfigLabel(name string) string {
+	hash, err := Hash(name)
+	if err != nil {
+		panic("Unable to calculate hash, better to say good bye!")
+	}
+
+	return fmt.Sprintf("discoblocks/%d", hash)
+}
+
 // IsContainsAll finds for a contains all b
 func IsContainsAll(a, b map[string]string) bool {
 	match := 0
