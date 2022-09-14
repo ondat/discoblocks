@@ -66,7 +66,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 			nameParts = append(nameParts, fmt.Sprintf("%d", time.Now().UnixNano()))
 
 			var err error
-			pod.Name, err = utils.RenderResourceName(nameParts...)
+			pod.Name, err = utils.RenderResourceName(false, nameParts...)
 			if err != nil {
 				return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to render resource name: %w", err))
 			}
@@ -118,7 +118,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		if pod.Labels == nil {
 			pod.Labels = map[string]string{}
 		}
-		pod.Labels[utils.RenderMetricsLabel(pod.Name)] = pod.Name
+		pod.Labels["discoblocks-metrics"] = pod.Name
 
 		logger.Info("Fetch StorageClass...")
 

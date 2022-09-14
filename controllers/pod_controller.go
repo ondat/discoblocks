@@ -3,7 +3,6 @@ package controllers
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/ondat/discoblocks/pkg/utils"
@@ -37,7 +36,7 @@ type PodReconciler struct {
 func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx).WithName("PodReconciler").WithValues("name", req.Name, "namespace", req.Name)
 
-	serviceName, err := utils.RenderResourceName(req.Name, req.Namespace)
+	serviceName, err := utils.RenderResourceName(true, req.Name, req.Namespace)
 	if err != nil {
 		logger.Error(err, "Failed to render resource name")
 		return ctrl.Result{}, nil
@@ -52,8 +51,9 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	service.Labels = map[string]string{
 		"discoblocks": req.Name,
 	}
+
 	service.Spec.Selector = map[string]string{
-		utils.RenderMetricsLabel(req.Name): req.Name,
+		"discoblocks-metrics": req.Name,
 	}
 
 	pod := &corev1.Pod{}
@@ -111,13 +111,9 @@ func (ef podEventFilter) Create(e event.CreateEvent) bool {
 		return false
 	}
 
-	for k := range obj.Labels {
-		if strings.HasPrefix(k, "discoblocks-metrics/") {
-			return true
-		}
-	}
+	_, ok = obj.Labels["discoblocks-metrics"]
 
-	return false
+	return ok
 }
 
 func (ef podEventFilter) Delete(_ event.DeleteEvent) bool {

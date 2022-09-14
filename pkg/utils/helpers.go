@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 	"regexp"
@@ -62,9 +63,18 @@ func RenderFinalizer(name string, extras ...string) string {
 }
 
 // RenderResourceName calculates resource name
-func RenderResourceName(elems ...string) (string, error) {
+func RenderResourceName(prefix bool, elems ...string) (string, error) {
 	builder := strings.Builder{}
-	builder.WriteString("discoblocks")
+
+	if len(elems) == 0 {
+		return "", errors.New("missing name elements")
+	}
+
+	if prefix {
+		builder.WriteString("discoblocks")
+	} else {
+		builder.WriteString(elems[0])
+	}
 
 	for _, e := range elems {
 		hash, err := Hash(e)
@@ -81,16 +91,6 @@ func RenderResourceName(elems ...string) (string, error) {
 	}
 
 	return builder.String()[:l], nil
-}
-
-// RenderMetricsLabel renders metrics label
-func RenderMetricsLabel(name string) string {
-	hash, err := Hash(name)
-	if err != nil {
-		panic("Unable to calculate hash, better to say good bye!")
-	}
-
-	return fmt.Sprintf("discoblocks-metrics/%d", hash)
 }
 
 // IsContainsAll finds for a contains all b
