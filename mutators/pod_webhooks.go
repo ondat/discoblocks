@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/moby/moby/pkg/namesgenerator"
 	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
 	"github.com/ondat/discoblocks/pkg/drivers"
@@ -72,6 +73,10 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 				return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to render resource name: %w", err))
 			}
 		}
+	}
+
+	if pod.UID == "" {
+		pod.UID = types.UID(uuid.New().String())
 	}
 
 	logger = podMutatorLog.WithValues("name", pod.Name, "namespace", pod.Namespace)
