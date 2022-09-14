@@ -1,7 +1,7 @@
 apiVersion: discoblocks.ondat.io/v1
 kind: DiskConfig
 metadata:
-  name: diskconfig-sample-aws-ebs
+  name: diskconfig-sample
   namespace: default
 spec:
   storageClassName: ebs-sc
