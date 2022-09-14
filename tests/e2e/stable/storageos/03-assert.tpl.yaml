@@ -99,6 +99,8 @@ kind: Pod
 metadata:
   labels:
     app: nginx
+    discoblocks/2498526953: diskconfig-sample-storageos-once
+    discoblocks/619933494: diskconfig-sample-storageos-same
     discoblocks-metrics: #POD_NAME#
   name: #POD_NAME#
   namespace: default
@@ -130,7 +132,8 @@ apiVersion: v1
 kind: Service
 metadata:
   labels:
-    discoblocks: #POD_NAME#
+    discoblocks/2498526953: diskconfig-sample-storageos-once
+    discoblocks/619933494: diskconfig-sample-storageos-same
   name: #SERVICE_NAME#
   namespace: default
 spec:

@@ -118,6 +118,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		if pod.Labels == nil {
 			pod.Labels = map[string]string{}
 		}
+		pod.Labels[utils.RenderDiskConfigLabel(config.Name)] = config.Name
 		pod.Labels["discoblocks-metrics"] = pod.Name
 
 		logger.Info("Fetch StorageClass...")

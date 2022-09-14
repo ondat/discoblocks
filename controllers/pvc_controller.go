@@ -180,6 +180,11 @@ func (r *PVCReconciler) MonitorVolumes() {
 				if _, ok := discoblocks[podName]; !ok {
 					discoblocks[podName] = []string{}
 				}
+				for k, v := range endpoints.Items[i].Labels {
+					if strings.HasPrefix(k, "discoblocks/") {
+						discoblocks[podName] = append(discoblocks[podName], v)
+					}
+				}
 				discoblocks[podName] = append(discoblocks[podName], endpoints.Items[i].Labels["discoblocks"])
 
 				logger := logger.WithValues("pod_name", podName.String(), "ep_name", endpoints.Items[i].Name, "IP", ip.IP)
