@@ -60,7 +60,9 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, nil
 	}
 
-	service.Labels = map[string]string{}
+	service.Labels = map[string]string{
+		"discoblocks": req.Name,
+	}
 	for k, v := range pod.Labels {
 		if strings.HasPrefix(k, "discoblocks/") {
 			service.Labels[k] = v
