@@ -515,7 +515,7 @@ WAIT_PVC:
 		}
 	}
 
-	vaName, err := utils.RenderResourceName(config.Name, pvc.Name, pvc.Namespace)
+	vaName, err := utils.RenderResourceName(true, config.Name, pvc.Name, pvc.Namespace)
 	if err != nil {
 		logger.Error(err, "Failed to render VolumeAttachment name")
 		return
@@ -660,7 +660,7 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 	if waitForMeta != "" {
 		volumeAttachment := &storagev1.VolumeAttachment{}
 
-		vaName, err := utils.RenderResourceName(config.Name, pvc.Name, pvc.Namespace)
+		vaName, err := utils.RenderResourceName(true, config.Name, pvc.Name, pvc.Namespace)
 		if err != nil {
 			logger.Error(err, "Failed to render VolumeAttachment name")
 			return

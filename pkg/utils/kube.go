@@ -131,7 +131,7 @@ func RenderHostJob(pvcName, namespace, nodeName, dev, fs, mountPoint string, con
 
 	hostCommand = string(hostCommandReplacePattern.ReplaceAll([]byte(hostCommand), []byte(hostCommandPrefix)))
 
-	jobName, err := RenderResourceName(fmt.Sprintf("%d", time.Now().UnixNano()), pvcName, namespace)
+	jobName, err := RenderResourceName(true, fmt.Sprintf("%d", time.Now().UnixNano()), pvcName, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("unable to render resource name: %w", err)
 	}
@@ -149,7 +149,7 @@ func RenderHostJob(pvcName, namespace, nodeName, dev, fs, mountPoint string, con
 
 // NewPVC constructs a new PVC instance
 func NewPVC(config *discoblocksondatiov1.DiskConfig, prefix string, driver *drivers.Driver) (*corev1.PersistentVolumeClaim, error) {
-	pvcName, err := RenderResourceName(prefix, config.Name, config.Namespace)
+	pvcName, err := RenderResourceName(true, prefix, config.Name, config.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("unable to calculate hash: %w", err)
 	}
