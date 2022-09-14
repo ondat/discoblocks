@@ -58,7 +58,15 @@ securityContext:
 // RenderMountPoint calculates mount point
 func RenderMountPoint(pattern, name string, index int) string {
 	if pattern == "" {
-		return fmt.Sprintf(defaultMountPattern, name, 0)
+		return fmt.Sprintf(defaultMountPattern, name, index)
+	}
+
+	if index != 0 && !strings.Contains(pattern, "%d") {
+		pattern = pattern + "-%d"
+	}
+
+	if !strings.Contains(pattern, "%d") {
+		return pattern
 	}
 
 	return fmt.Sprintf(pattern, index)

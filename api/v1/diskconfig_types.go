@@ -39,9 +39,9 @@ type DiskConfigSpec struct {
 	//+kubebuilder:validation:Optional
 	Capacity string `json:"capacity,omitempty" yaml:"capacity,omitempty"`
 
-	// MountPointPattern is the mount point of the disk. %d represents disk number in order.
+	// MountPointPattern is the mount point of the disk. %d is optional and represents disk number in order. Will be automatically appended for second drive if missing.
 	//+kubebuilder:default:="/media/discoblocks/<name>-%d"
-	//+kubebuilder:validation:Pattern:="^/(.*)%d(.*)"
+	//+kubebuilder:validation:Pattern:="^/(.*)"
 	//+kubebuilder:validation:Optional
 	MountPointPattern string `json:"mountPointPattern,omitempty" yaml:"mountPointPattern,omitempty"`
 
