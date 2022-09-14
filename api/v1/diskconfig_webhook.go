@@ -71,7 +71,6 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 	logger.Info("Validate update...")
 	defer logger.Info("Validated")
 
-	// TODO remove once we generate detault
 	if r.Spec.StorageClassName == "" {
 		logger.Info("StorageClass name is invalid")
 		return errors.New("invalid StorageClass name")

@@ -114,11 +114,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	jobReconciler := &controllers.JobReconciler{
+	if err = (&controllers.JobReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-	}
-	if err = jobReconciler.SetupWithManager(mgr); err != nil {
+	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Job")
 		os.Exit(1)
 	}
@@ -140,7 +139,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// TODO close not handled
 	if _, err = (&controllers.PVCReconciler{
 		NodeCache:  nodeReconciler,
 		InProgress: sync.Map{},
@@ -174,7 +172,7 @@ func main() {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)
 	}
-	// TODO proper ready check would be nice
+
 	if err = mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
