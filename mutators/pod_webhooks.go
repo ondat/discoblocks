@@ -58,7 +58,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 	if pod.Name == "" {
 		if len(pod.OwnerReferences) == 0 {
-			pod.Name = namesgenerator.GetRandomName(1)
+			pod.Name = fmt.Sprintf("%s-%d", namesgenerator.GetRandomName(0), time.Now().UnixNano())
 		} else {
 			nameParts := []string{}
 			for _, r := range pod.OwnerReferences {
