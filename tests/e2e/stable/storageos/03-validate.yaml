@@ -8,6 +8,6 @@ commands:
       -e "s/#PVC_SAME_NAME#/$(kubectl get pvc -l discoblocks=diskconfig-sample-storageos-same --no-headers -o custom-columns=":metadata.name")/" \
       -e "s/#PV_SAME_NAME#/$(kubectl get pvc -l discoblocks=diskconfig-sample-storageos-same --no-headers -o custom-columns=":spec.volumeName")/" \
       -e "s/#POD_NAME#/$(kubectl get po -l app=nginx --no-headers -o custom-columns=":metadata.name")/" \
-      -e "s/#SERVICE_NAME#/$(kubectl get srv -l discoblocks --no-headers -o custom-columns=":metadata.name")/" \
+      -e "s/#SERVICE_NAME#/$(kubectl get service -l discoblocks --no-headers -o custom-columns=":metadata.name")/" \
       > workload/00-assert.yaml'
   - command: kubectl-kuttl assert workload

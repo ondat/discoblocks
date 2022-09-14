@@ -214,7 +214,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 			for name, mp := range volumes {
 				if mp == mountpoint {
 					logger.Info("Mount point already added", "exists", name, "actual", pvcName, "mountpoint", sc.Provisioner)
-					return errorMode(http.StatusInternalServerError, "Unable to init a PVC", err)
+					return errorMode(http.StatusInternalServerError, "Unable to init a PVC", fmt.Errorf("mount point already added: %s:/%s", pvcName, name))
 				}
 			}
 
