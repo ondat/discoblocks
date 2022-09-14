@@ -132,6 +132,7 @@ metadata:
   labels:
     discoblocks: #POD_NAME#
   name: #SERVICE_NAME#
+  namespace: default
 spec:
   selector:
     discoblocks-metrics: #POD_NAME#
