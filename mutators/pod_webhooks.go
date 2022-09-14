@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/moby/moby/pkg/namesgenerator"
 	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
 	"github.com/ondat/discoblocks/pkg/drivers"
 	"github.com/ondat/discoblocks/pkg/utils"
@@ -41,7 +42,7 @@ type PodMutator struct {
 // Handle pod mutation
 //nolint:gocyclo // It is complex we know
 func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admission.Response {
-	logger := podMutatorLog.WithValues("name", req.Name, "namespace", req.Namespace)
+	logger := podMutatorLog.WithValues("req_name", req.Name, "req_namespace", req.Namespace)
 
 	logger.Info("Handling...")
 	defer logger.Info("Handled")
@@ -50,6 +51,30 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 	if err := a.decoder.Decode(req, &pod); err != nil {
 		return admission.Errored(http.StatusBadRequest, fmt.Errorf("unable to decode request: %w", err))
 	}
+
+	if pod.Namespace == "" {
+		pod.Namespace = "default"
+	}
+
+	if pod.Name == "" {
+		if len(pod.OwnerReferences) == 0 {
+			pod.Name = namesgenerator.GetRandomName(1)
+		} else {
+			nameParts := []string{}
+			for _, r := range pod.OwnerReferences {
+				nameParts = append(nameParts, r.Name)
+			}
+			nameParts = append(nameParts, fmt.Sprintf("%d", time.Now().UnixNano()))
+
+			var err error
+			pod.Name, err = utils.RenderResourceName(nameParts...)
+			if err != nil {
+				return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to render resource name: %w", err))
+			}
+		}
+	}
+
+	logger = podMutatorLog.WithValues("name", pod.Name, "namespace", pod.Namespace)
 
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()

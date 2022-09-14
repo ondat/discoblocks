@@ -540,6 +540,7 @@ WAIT_PVC:
 					APIVersion: pv.APIVersion,
 					Kind:       pv.Kind,
 					Name:       pv.Name,
+					UID:        pv.UID,
 				},
 			},
 		},
