@@ -51,7 +51,7 @@ func GetCSIDriverNamespace() {
 
 //export GetCSIDriverPodLabels
 func GetCSIDriverPodLabels() {
-	fmt.Fprint(os.Stdout, `{ "app.kubernetes.io/component": "ebs-csi-controller", "app.kubernetes.io/name": "aws-ebs-csi-driver" }`)
+	fmt.Fprint(os.Stdout, `{ "app": "ebs-csi-controller" }`)
 }
 
 //export GetMountCommand
