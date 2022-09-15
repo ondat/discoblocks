@@ -185,7 +185,6 @@ func (r *PVCReconciler) MonitorVolumes() {
 						discoblocks[podName] = append(discoblocks[podName], v)
 					}
 				}
-				discoblocks[podName] = append(discoblocks[podName], endpoints.Items[i].Labels["discoblocks"])
 
 				logger := logger.WithValues("pod_name", podName.String(), "ep_name", endpoints.Items[i].Name, "IP", ip.IP)
 
