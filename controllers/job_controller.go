@@ -3,15 +3,21 @@ package controllers
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/go-logr/logr"
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/selection"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // JobReconciler reconciles a Job object
@@ -30,6 +36,44 @@ type JobReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.11.0/pkg/reconcile
 func (r *JobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := log.FromContext(ctx).WithName("JobReconciler").WithValues("name", req.Name, "namespace", req.Name)
+
+	logger.Info("Reconcile job...")
+	defer logger.Info("Reconciled")
+
+	label, err := labels.NewRequirement("job-name", selection.Equals, []string{req.Name})
+	if err != nil {
+		logger.Error(err, "Unable to parse Job label selector")
+		return ctrl.Result{}, nil
+	}
+	jobSelector := labels.NewSelector().Add(*label)
+
+	logger.Info("Fetch Pods...")
+
+	podList := corev1.PodList{}
+	if err = r.List(ctx, &podList, &client.ListOptions{
+		Namespace:     req.Namespace,
+		LabelSelector: jobSelector,
+	}); err != nil {
+		logger.Info("Failed to list Jobs", "error", err.Error())
+		return ctrl.Result{}, fmt.Errorf("unable to list Jobs: %w", err)
+	}
+
+	for i := range podList.Items {
+		logger.Info("Delete Pod...", "name", podList.Items[i].Name)
+
+		if err := r.Client.Delete(ctx, &podList.Items[i]); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+
+			logger.Info("Failed to delete pod", "name", podList.Items[i].Name, "error", err.Error())
+			return ctrl.Result{}, fmt.Errorf("unable to delete pod %s: %w", podList.Items[i].Name, err)
+		}
+	}
+
+	logger.Info("Delete Job...")
+
 	return ctrl.Result{}, r.Client.Delete(ctx, &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      req.Name,

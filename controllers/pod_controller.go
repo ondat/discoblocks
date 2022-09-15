@@ -37,6 +37,11 @@ type PodReconciler struct {
 func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx).WithName("PodReconciler").WithValues("name", req.Name, "namespace", req.Name)
 
+	logger.Info("Reconcile pod...")
+	defer logger.Info("Reconciled")
+
+	logger.Info("Fetch Pod...")
+
 	pod := &corev1.Pod{}
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: req.Name, Namespace: req.Namespace}, pod); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -83,6 +88,7 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	}
 
 	logger.Info("Create Service...")
+
 	if err = r.Client.Create(ctx, service); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
 			logger.Error(err, "Failed to create Service")
