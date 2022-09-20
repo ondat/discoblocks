@@ -76,7 +76,7 @@ vars:
 patches:
   - patch: |-
       - op: replace
-        path: "/spec/template/spec/containers/1/env/0"
+        path: "/spec/template/spec/containers/0/env/0"
         value:
           name: SUPPORTED_CSI_DRIVERS
           value: "ebs.csi.aws.com"
