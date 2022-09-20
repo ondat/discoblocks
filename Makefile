@@ -140,7 +140,7 @@ kubebuilder: ## Download kubebuilder locally if necessary.
 HUSKY = $(shell pwd)/bin/husky
 .PHONY: husky
 husky: ## Download husky locally if necessary.
-	$(call go-get-tool,$(HUSKY),github.com/automation-co/husky@v0.2.5)
+	$(call go-get-tool,$(HUSKY),github.com/automation-co/husky@v0.2.14)
 
 # go-get-tool will 'go get' any package $2 and install it to $1.
 PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
@@ -151,7 +151,7 @@ TMP_DIR=$$(mktemp -d) ;\
 cd $$TMP_DIR ;\
 go mod init tmp ;\
 echo "Downloading $(2)" ;\
-GOBIN=$(PROJECT_DIR)/bin go get $(2) ;\
+GOBIN=$(PROJECT_DIR)/bin go install $(2) ;\
 rm -rf $$TMP_DIR ;\
 }
 endef
