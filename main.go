@@ -22,6 +22,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -56,14 +57,17 @@ var (
 //+kubebuilder:rbac:groups=discoblocks.ondat.io,resources=diskconfigs,verbs=get;list;watch;create;update;delete
 //+kubebuilder:rbac:groups=discoblocks.ondat.io,resources=diskconfigs/status,verbs=update
 //+kubebuilder:rbac:groups=discoblocks.ondat.io,resources=diskconfigs/finalizers,verbs=update
-//+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update
-//+kubebuilder:rbac:groups="",resources=persistentvolumeclaims/finalizers,verbs=update
+//+kubebuilder:rbac:groups="storage.k8s.io",resources=volumeattachments,verbs=create;list;watch
 //+kubebuilder:rbac:groups="storage.k8s.io",resources=storageclasses,verbs=get;update
 //+kubebuilder:rbac:groups="storage.k8s.io",resources=storageclasses/finalizers,verbs=update
+//+kubebuilder:rbac:groups="batch",resources=jobs,verbs=create;list;watch;delete
+//+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update
+//+kubebuilder:rbac:groups="",resources=persistentvolumeclaims/finalizers,verbs=update
+//+kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=list
 //+kubebuilder:rbac:groups="",resources=services,verbs=create;update;delete
 //+kubebuilder:rbac:groups="",resources=services/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=endpoints,verbs=list;watch
-//+kubebuilder:rbac:groups="",resources=pod,verbs=get
+//+kubebuilder:rbac:groups="",resources=pod,verbs=get;delete
 
 // indirect rbac
 //+kubebuilder:rbac:groups="",resources=namespaces;services;pods;persistentvolumes;replicationcontrollers,verbs=list;watch
@@ -110,6 +114,31 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&controllers.PodReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Pod")
+		os.Exit(1)
+	}
+
+	if err = (&controllers.JobReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Job")
+		os.Exit(1)
+	}
+
+	nodeReconciler := &controllers.NodeReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}
+	if err = nodeReconciler.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Node")
+		os.Exit(1)
+	}
+
 	if err = (&controllers.DiskConfigReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -118,10 +147,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	// TODO close not handled
 	if _, err = (&controllers.PVCReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		NodeCache:  nodeReconciler,
+		InProgress: sync.Map{},
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "PVC")
 		os.Exit(1)
@@ -150,7 +180,7 @@ func main() {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)
 	}
-	// TODO proper ready check would be nice
+
 	if err = mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
@@ -169,7 +199,7 @@ func main() {
 		os.Exit(1)
 	}()
 
-	setupLog.Info("starting manager")
+	setupLog.Info("Start manager")
 	if err = mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)

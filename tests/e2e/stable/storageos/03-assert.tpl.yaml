@@ -7,11 +7,41 @@ metadata:
     volume.beta.kubernetes.io/storage-provisioner: csi.storageos.com
     volume.kubernetes.io/storage-provisioner: csi.storageos.com
   finalizers:
-  - discoblocks.io/diskconfig-sample-storageos
+  - discoblocks.io/diskconfig-sample-storageos-once
   - kubernetes.io/pvc-protection
   labels:
-    discoblocks: diskconfig-sample-storageos
-  name: #PVC_NAME#
+    discoblocks: diskconfig-sample-storageos-once
+  name: #PVC_ONCE_NAME#
+  namespace: default
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: storageos
+  volumeMode: Filesystem
+status:
+  accessModes:
+  - ReadWriteOnce
+  capacity:
+    storage: 1Gi
+  phase: Bound
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  annotations:
+    pv.kubernetes.io/bind-completed: "yes"
+    pv.kubernetes.io/bound-by-controller: "yes"
+    volume.beta.kubernetes.io/storage-provisioner: csi.storageos.com
+    volume.kubernetes.io/storage-provisioner: csi.storageos.com
+  finalizers:
+  - discoblocks.io/diskconfig-sample-storageos-same
+  - kubernetes.io/pvc-protection
+  labels:
+    discoblocks: diskconfig-sample-storageos-same
+  name: #PVC_SAME_NAME#
   namespace: default
 spec:
   accessModes:
@@ -34,7 +64,25 @@ metadata:
   finalizers:
   - kubernetes.io/pv-protection
   - external-attacher/csi-storageos-com
-  name: #PV_NAME#
+  name: #PV_ONCE_NAME#
+spec:
+  accessModes:
+  - ReadWriteOnce
+  capacity:
+    storage: 1Gi
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: storageos
+  volumeMode: Filesystem
+status:
+  phase: Bound
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  finalizers:
+  - kubernetes.io/pv-protection
+  - external-attacher/csi-storageos-com
+  name: #PV_SAME_NAME#
 spec:
   accessModes:
   - ReadWriteOnce
@@ -51,26 +99,43 @@ kind: Pod
 metadata:
   labels:
     app: nginx
-    discoblocks/metrics: diskconfig-sample-storageos
+    discoblocks/2498526953: diskconfig-sample-storageos-once
+    discoblocks/619933494: diskconfig-sample-storageos-same
+    discoblocks-metrics: #POD_NAME#
   name: #POD_NAME#
   namespace: default
 spec:
   containers:
-  - image: nginx
+  - image: nginx:1.23
     volumeMounts:
     - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
-    - mountPath: /media/discoblocks/sample-0
-      name: #PVC_NAME#
+    - mountPath: /media/discoblocks/once-0
+    - mountPath: /media/discoblocks/same-0
   - image: bitnami/node-exporter:1.3.1
     volumeMounts:
-    - mountPath: /media/discoblocks/sample-0
-      name: #PVC_NAME#
+    - mountPath: /media/discoblocks/once-0
+    - mountPath: /media/discoblocks/same-0
     - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
   volumes:
   - projected:
       defaultMode: 420
-  - name: #PVC_NAME#
+  - name: #PVC_ONCE_NAME#
     persistentVolumeClaim:
-      claimName: #PVC_NAME#
+      claimName: #PVC_ONCE_NAME#
+  - name: #PVC_SAME_NAME#
+    persistentVolumeClaim:
+      claimName: #PVC_SAME_NAME#
 status:
   phase: Running
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    discoblocks/2498526953: diskconfig-sample-storageos-once
+    discoblocks/619933494: diskconfig-sample-storageos-same
+  name: #SERVICE_NAME#
+  namespace: default
+spec:
+  selector:
+    discoblocks-metrics: #POD_NAME#

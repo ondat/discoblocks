@@ -42,8 +42,15 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - persistentvolumes
+  verbs:
+  - list
+- apiGroups:
+  - ""
+  resources:
   - pod
   verbs:
+  - delete
   - get
 - apiGroups:
   - ""
@@ -65,6 +72,15 @@ rules:
   - replicasets
   - statefulsets
   verbs:
+  - list
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
   - list
   - watch
 - apiGroups:
@@ -120,3 +136,11 @@ rules:
   - storageclasses/finalizers
   verbs:
   - update
+- apiGroups:
+  - storage.k8s.io
+  resources:
+  - volumeattachments
+  verbs:
+  - create
+  - list
+  - watch

@@ -92,7 +92,7 @@ func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	case config.DeletionTimestamp != nil:
 		logger.Info("DiskConfig delete in progress")
 
-		logger.Info("Updating phase to Deleting...")
+		logger.Info("Update phase to Deleting...")
 
 		config.Status.Phase = discoblocksondatiov1.Deleting
 		if err = r.Client.Status().Update(ctx, &config); err != nil {
@@ -103,7 +103,7 @@ func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
-	logger.Info("Updating phase to Running...")
+	logger.Info("Update phase to Running...")
 
 	config.Status.Phase = discoblocksondatiov1.Running
 	if err = r.Client.Status().Update(ctx, &config); err != nil {
@@ -114,7 +114,7 @@ func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	var result ctrl.Result
 	result, err = r.reconcileUpdate(ctx, &config, logger.WithValues("mode", "update"))
 	if err == nil {
-		logger.Info("Updating phase to Ready...")
+		logger.Info("Update phase to Ready...")
 
 		config.Status.Phase = discoblocksondatiov1.Ready
 		if err = r.Client.Status().Update(ctx, &config); err != nil {
@@ -137,13 +137,12 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 	scFinalizer := utils.RenderFinalizer(configName, configNamespace)
 
 	for i := range scList.Items {
-		if !controllerutil.ContainsFinalizer(&scList.Items[i], scFinalizer) {
+		if scList.Items[i].DeletionTimestamp != nil || !controllerutil.ContainsFinalizer(&scList.Items[i], scFinalizer) {
 			continue
 		}
 
 		controllerutil.RemoveFinalizer(&scList.Items[i], scFinalizer)
 
-		//nolint:govet // logger is ok to shadowing
 		logger := logger.WithValues("sc_name", scList.Items[i].Name)
 		logger.Info("Remove StorageClass finalizer...", "finalizer", scFinalizer)
 
@@ -152,6 +151,14 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 			return ctrl.Result{}, fmt.Errorf("unable to remove finalizer of StorageClass: %w", err)
 		}
 	}
+
+	finalizer := utils.RenderFinalizer(configName)
+
+	logger.Info("Update PVCs...")
+
+	sem := utils.CreateSemaphore(concurrency, time.Nanosecond)
+	errChan := make(chan error)
+	wg := sync.WaitGroup{}
 
 	logger.Info("Fetch PVCs...")
 
@@ -170,36 +177,6 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 		logger.Info("Failed to list PVCs", "error", err.Error())
 		return ctrl.Result{}, fmt.Errorf("unable to list PVCs: %w", err)
 	}
-
-	finalizer := utils.RenderFinalizer(configName)
-
-	logger.Info("Delete Service...")
-
-	service := corev1.Service{}
-	if err := r.Get(ctx, types.NamespacedName{Name: configName, Namespace: configNamespace}, &service); err != nil && !apierrors.IsNotFound(err) {
-		logger.Info("Unable to fetch Service", "error", err.Error())
-		return ctrl.Result{}, fmt.Errorf("unable to fetch Service: %w", err)
-	} else if err == nil {
-		if controllerutil.ContainsFinalizer(&service, finalizer) {
-			controllerutil.RemoveFinalizer(&service, finalizer)
-
-			if err = r.Client.Update(ctx, &service); err != nil {
-				logger.Info("Unable to update Service", "error", err.Error())
-				return ctrl.Result{}, fmt.Errorf("unable to update Service: %w", err)
-			}
-		}
-
-		if err = r.Client.Delete(ctx, &service); err != nil {
-			logger.Info("Unable to delete Service", "error", err.Error())
-			return ctrl.Result{}, fmt.Errorf("unable to delete Service: %w", err)
-		}
-	}
-
-	logger.Info("Update PVCs...")
-
-	sem := utils.CreateSemaphore(concurrency, time.Nanosecond)
-	errChan := make(chan error)
-	wg := sync.WaitGroup{}
 
 	for i := range pvcList.Items {
 		if !controllerutil.ContainsFinalizer(&pvcList.Items[i], utils.RenderFinalizer(pvcList.Items[i].Labels["discoblocks"])) {
@@ -223,8 +200,6 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 
 			if controllerutil.ContainsFinalizer(&pvcList.Items[i], finalizer) {
 				controllerutil.RemoveFinalizer(&pvcList.Items[i], finalizer)
-
-				//nolint:govet // logger is ok to shadowing
 				logger := logger.WithValues("pvc_name", pvcList.Items[i].Name, "pvc_namespace", pvcList.Items[i].Namespace)
 				logger.Info("Update PVC finalizer...", "finalizer", finalizer)
 
@@ -264,7 +239,6 @@ func (r *DiskConfigReconciler) reconcileUpdate(ctx context.Context, config *disc
 	sc := storagev1.StorageClass{}
 	if err := r.Get(ctx, types.NamespacedName{Name: config.Spec.StorageClassName}, &sc); err != nil {
 		if apierrors.IsNotFound(err) {
-			// TODO create default storageclass
 			logger.Info("StorageClass not found")
 			return ctrl.Result{RequeueAfter: time.Minute}, nil
 		}
@@ -287,31 +261,18 @@ func (r *DiskConfigReconciler) reconcileUpdate(ctx context.Context, config *disc
 		}
 	}
 
-	service, err := utils.RenderMetricsService(config.Name, config.Namespace)
-	if err != nil {
-		logger.Error(err, "Failed to render Service")
-		return ctrl.Result{}, fmt.Errorf("unable to render Service: %w", err)
-	}
-
-	controllerutil.AddFinalizer(service, utils.RenderFinalizer(config.Name))
-	service.Labels = map[string]string{
-		"discoblocks": config.Name,
-	}
-	service.Spec.Selector = map[string]string{
-		"discoblocks/metrics": config.Name,
-	}
-
-	logger.Info("Create Service...")
-	if err = r.Client.Create(ctx, service); err != nil {
-		if !apierrors.IsAlreadyExists(err) {
-			logger.Info("Failed to create Service", "error", err.Error())
-			return ctrl.Result{}, fmt.Errorf("unable to create Service: %w", err)
-		}
-
-		logger.Info("Service already exists")
-	}
-
 	return ctrl.Result{}, nil
+}
+
+// SetupWithManager sets up the controller with the Manager.
+func (r *DiskConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&discoblocksondatiov1.DiskConfig{}).
+		WithEventFilter(diskConfigEventFilter{logger: mgr.GetLogger().WithName("DiskConfigReconciler")}).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 1,
+		}).
+		Complete(r)
 }
 
 type diskConfigEventFilter struct {
@@ -339,7 +300,6 @@ func (ef diskConfigEventFilter) Update(e event.UpdateEvent) bool {
 		return false
 	}
 
-	// TODO maybe there is a mor eperformant way to compare
 	newRawSpec, err := json.Marshal(newObj.Spec)
 	if err != nil {
 		ef.logger.Error(errors.New("invalid content"), "Unable to marshal new object")
@@ -357,15 +317,4 @@ func (ef diskConfigEventFilter) Update(e event.UpdateEvent) bool {
 
 func (ef diskConfigEventFilter) Generic(_ event.GenericEvent) bool {
 	return false
-}
-
-// SetupWithManager sets up the controller with the Manager.
-func (r *DiskConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&discoblocksondatiov1.DiskConfig{}).
-		WithEventFilter(diskConfigEventFilter{logger: mgr.GetLogger().WithName("DiskConfigReconciler")}).
-		WithOptions(controller.Options{
-			MaxConcurrentReconciles: 1,
-		}).
-		Complete(r)
 }

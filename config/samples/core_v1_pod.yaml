@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    discoblocks: diskconfig-sample
+  name: diskconfig-sample
+spec:
+  # hostPID: true
+  containers:
+  - name: alpine
+    image: alpine:3.15.4
+    command:
+    - sleep
+    - infinity
+    volumeMounts:
+    - mountPath: /host
+      name: host
+    securityContext:
+      privileged: true
+  volumes:
+    - hostPath:
+        path: /
+      name: host

@@ -53,10 +53,56 @@ func TestRenderMountPoint(t *testing.T) {
 	}
 }
 
-func TestGetSidecarStub(t *testing.T) {
-	_, err := RenderMetricsSidecar()
+func TestGetMountPointIndex(t *testing.T) {
+	t.Parallel()
 
-	assert.Nil(t, err, "invalid sidecar template")
+	cases := map[string]struct {
+		pattern       string
+		mountPoint    string
+		expectedIndex int
+	}{
+		"without order": {
+			pattern:       "/media/discoblocks/foo",
+			mountPoint:    "/media/discoblocks/foo",
+			expectedIndex: 0,
+		},
+		"without high order": {
+			pattern:       "/media/discoblocks/foo",
+			mountPoint:    "/media/discoblocks/foo-99",
+			expectedIndex: 99,
+		},
+		"with order": {
+			pattern:       "/media/discoblocks/foo-%d",
+			mountPoint:    "/media/discoblocks/foo-0",
+			expectedIndex: 0,
+		},
+		"with higher order": {
+			pattern:       "/media/discoblocks/foo-%d",
+			mountPoint:    "/media/discoblocks/foo-99",
+			expectedIndex: 99,
+		},
+		"not found": {
+			pattern:       "/media/discoblocks/foo",
+			mountPoint:    "/media/discoblocks/bar",
+			expectedIndex: -1,
+		},
+		"too many": {
+			pattern:       "/media/discoblocks/foo",
+			mountPoint:    "/media/discoblocks/foo-1000",
+			expectedIndex: -1,
+		},
+	}
+
+	for n, c := range cases {
+		c := c
+		t.Run(n, func(t *testing.T) {
+			t.Parallel()
+
+			index := GetMountPointIndex(c.pattern, "", c.mountPoint)
+
+			assert.Equal(t, c.expectedIndex, index, "invalid index")
+		})
+	}
 }
 
 func TestParsePrometheusMetric(t *testing.T) {
@@ -80,4 +126,9 @@ func TestParsePrometheusMetricValue(t *testing.T) {
 
 	assert.Nil(t, err, "invalid metric")
 	assert.Equal(t, float64(1020678144), value)
+}
+
+func TestCompareStringNaturalOrder(t *testing.T) {
+	assert.True(t, CompareStringNaturalOrder("", "foo-1"))
+	assert.True(t, CompareStringNaturalOrder("foo-2", "foo-10"))
 }

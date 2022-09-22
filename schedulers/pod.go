@@ -31,7 +31,7 @@ func (s *podFilter) Name() string {
 
 // Filter does the filtering
 func (s *podFilter) Filter(ctx context.Context, state *framework.CycleState, pod *corev1.Pod, nodeInfo *framework.NodeInfo) *framework.Status {
-	logger := s.logger.WithValues("pod", pod.Name, "namespace", pod.Name, "node", nodeInfo.Node().Name)
+	logger := s.logger.WithValues("pod", pod.Name, "namespace", pod.Namespace, "node", nodeInfo.Node().Name)
 
 	errorStatus := framework.Success
 	if s.strict {
@@ -59,7 +59,7 @@ func (s *podFilter) Filter(ctx context.Context, state *framework.CycleState, pod
 	for i := range diskConfigs.Items {
 		config := diskConfigs.Items[i]
 
-		if !utils.IsContainsAll(pod.Labels, config.Spec.PodSelector) {
+		if config.DeletionTimestamp != nil || !utils.IsContainsAll(pod.Labels, config.Spec.PodSelector) {
 			continue
 		}
 
@@ -83,7 +83,6 @@ func (s *podFilter) Filter(ctx context.Context, state *framework.CycleState, pod
 	}
 
 	for scName := range storageClasses {
-		//nolint:govet // logger is ok to shadowing
 		logger := logger.WithValues("sc_name", scName)
 
 		logger.Info("Fetch StorageClass...")
@@ -109,7 +108,7 @@ func (s *podFilter) Filter(ctx context.Context, state *framework.CycleState, pod
 
 		namespace, podLabels, err := driver.GetCSIDriverDetails()
 		if err != nil {
-			logger.Error(err, "Failed to call driver")
+			logger.Error(err, "Failed to call driver", "method", "GetCSIDriverDetails")
 			return framework.NewStatus(errorStatus, "failed to call driver: "+sc.Provisioner)
 		}
 

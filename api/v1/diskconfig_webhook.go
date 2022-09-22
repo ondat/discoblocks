@@ -20,13 +20,14 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/ondat/discoblocks/pkg/drivers"
 	"golang.org/x/net/context"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -35,7 +36,9 @@ import (
 )
 
 // log is for logging in this package
-var diskConfigLog = logf.Log.WithName("DiskConfigWebhook")
+var diskConfigLog = logf.Log.WithName("v1.DiskConfigWebhook")
+
+var reservedCharacters = regexp.MustCompile(`[>|<|||:|&|.|\+|\*|!|\?|\^|\$|\(|\)|\[|\]|\{|\}]`)
 
 // SetupWebhookWithManager sets up the webhook with the Manager.
 func (r *DiskConfig) SetupWebhookWithManager(mgr ctrl.Manager) error {
@@ -68,44 +71,30 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 	logger.Info("Validate update...")
 	defer logger.Info("Validated")
 
-	// TODO remove once we generate detault
 	if r.Spec.StorageClassName == "" {
 		logger.Info("StorageClass name is invalid")
 		return errors.New("invalid StorageClass name")
 	}
 
-	if _, err := resource.ParseQuantity(r.Spec.Policy.MaximumCapacityOfDisk); err != nil {
-		logger.Info("Max capacity is invalid")
-		return errors.New("invalid max capacity")
-	}
-
-	newCapacity, err := resource.ParseQuantity(r.Spec.Capacity)
-	if err != nil {
-		logger.Info("Capacity is invalid")
-		return errors.New("invalid new capacity")
-	}
-
-	maxCapacity, err := resource.ParseQuantity(r.Spec.Policy.MaximumCapacityOfDisk)
-	if err != nil {
-		logger.Info("Max capacity is invalid")
-		return errors.New("invalid max capacity")
-	}
-
-	if maxCapacity.CmpInt64(0) != 0 && maxCapacity.Cmp(newCapacity) == -1 {
+	if r.Spec.Policy.MaximumCapacityOfDisk.CmpInt64(0) != 0 && r.Spec.Policy.MaximumCapacityOfDisk.Cmp(r.Spec.Capacity) == -1 {
 		logger.Info("Capacity is more then max")
 		return errors.New("invalid new capacity, more then max")
+	}
+
+	if err := validateMountPattern(r.Spec.MountPointPattern); err != nil {
+		logger.Info("Invalid mount pattern", "error", err.Error())
+		return err
 	}
 
 	if old != nil {
 		oldDC, ok := old.(*DiskConfig)
 		if !ok {
-			err = errors.New("invalid old object")
+			err := errors.New("invalid old object")
 			logger.Error(err, "this should not happen")
 			return err
 		}
 
 		if !reflect.DeepEqual(oldDC.Spec.AccessModes, r.Spec.AccessModes) {
-			// TODO count PVCs by label, if 0 mode is ok to change
 			logger.Info("AccessModes is immutable")
 			return errors.New("access modes is immutable field")
 		}
@@ -116,20 +105,11 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 		}
 
 		if oldDC.Spec.MountPointPattern != r.Spec.MountPointPattern {
-			// TODO count PVCs by label, if 0 mode is ok to change
 			logger.Info("Mount pattern of StorageClass is immutable")
 			return errors.New("mount point pattern is immutable field")
 		}
 
-		var oldCapacity resource.Quantity
-		oldCapacity, err = resource.ParseQuantity(oldDC.Spec.Capacity)
-		if err != nil {
-			err = errors.New("invalid old capacity")
-			logger.Error(err, "this should not happen")
-			return err
-		}
-
-		if oldCapacity.CmpInt64(0) != 0 && oldCapacity.Cmp(newCapacity) == 1 {
+		if oldDC.Spec.Capacity.CmpInt64(0) != 0 && oldDC.Spec.Capacity.Cmp(r.Spec.Capacity) == 1 {
 			logger.Info("Shrinking disk is not supported")
 			return errors.New("shrinking disk is not supported")
 		}
@@ -146,7 +126,7 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 	logger.Info("Fetch StorageClass...")
 
 	sc := storagev1.StorageClass{}
-	if err = diskConfigWebhookDependencies.client.Get(ctx, types.NamespacedName{Name: r.Spec.StorageClassName}, &sc); err != nil {
+	if err := diskConfigWebhookDependencies.client.Get(ctx, types.NamespacedName{Name: r.Spec.StorageClassName}, &sc); err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.Info("StorageClass not found")
 		} else {
@@ -169,7 +149,7 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 
 	valid, err := driver.IsStorageClassValid(&sc)
 	if err != nil {
-		logger.Error(err, "Failed to call driver")
+		logger.Error(err, "Failed to call driver", "method", "IsStorageClassValid")
 		return fmt.Errorf("failed to call driver: %w", err)
 	} else if !valid {
 		logger.Info("Invalid StorageClass", "error", err.Error())
@@ -182,6 +162,18 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
 func (r *DiskConfig) ValidateDelete() error {
 	diskConfigLog.Info("validate delete", "name", r.Name)
+
+	return nil
+}
+
+func validateMountPattern(pattern string) error {
+	if strings.Count(pattern, "%d") > 1 {
+		return errors.New("invalid mount pattern, only one %d allowed")
+	}
+
+	if reservedCharacters.MatchString(pattern) {
+		return errors.New("invalid mount pattern, contains reserved characters")
+	}
 
 	return nil
 }

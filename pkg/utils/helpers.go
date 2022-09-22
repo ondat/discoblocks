@@ -1,59 +1,21 @@
 package utils
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
+	"regexp"
 	"strings"
+	"time"
 
+	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
-	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/yaml"
 )
 
+const maxName = 253
+
 const defaultMountPattern = "/media/discoblocks/%s-%d"
-
-// TODO on this way on case of multiple discoblocks on a pod,
-// all service would capture all disks leads to redundant data
-const metricsServiceTemplate = `kind: Service
-apiVersion: v1
-metadata:
-  name: %s
-  namespace: %s
-  annotations:
-    prometheus.io/path: "/metrics"
-    prometheus.io/scrape: "true"
-    prometheus.io/port:   "9100"
-spec:
-  ports:
-  - name: node-exporter
-    protocol: TCP
-    port: 9100
-    targetPort: 9100`
-
-// TODO limit filesystem reports to discoblocks (ignored-mount-points)
-const metricsTeamplate = `name: discoblocks-metrics
-image: bitnami/node-exporter:1.3.1
-ports:
-- containerPort: 9100
-  protocol: TCP
-command:
-- /opt/bitnami/node-exporter/bin/node_exporter
-- --collector.disable-defaults
-- --collector.filesystem`
-
-// TODO maybe a config map for templates makes sense
-const sidecarTeamplate = `name: discoblocks-manager
-image: alpine:3.15.4
-command:
-- sleep
-- infinity
-volumeMounts:
-- name: dev
-  mountPath: /host/dev
-securityContext:
-  allowPrivilegeEscalation: true
-  privileged: true`
 
 // RenderMountPoint calculates mount point
 func RenderMountPoint(pattern, name string, index int) string {
@@ -62,7 +24,7 @@ func RenderMountPoint(pattern, name string, index int) string {
 	}
 
 	if index != 0 && !strings.Contains(pattern, "%d") {
-		pattern = pattern + "-%d"
+		pattern += "-%d"
 	}
 
 	if !strings.Contains(pattern, "%d") {
@@ -70,6 +32,23 @@ func RenderMountPoint(pattern, name string, index int) string {
 	}
 
 	return fmt.Sprintf(pattern, index)
+}
+
+// GetMountPointIndex calculates index by mount point
+func GetMountPointIndex(pattern, name, mountPoint string) int {
+	if mountPoint == RenderMountPoint(pattern, name, 0) {
+		return 0
+	}
+
+	const maxDisks = 500
+
+	for i := 1; i < maxDisks; i++ {
+		if mountPoint == RenderMountPoint(pattern, name, i) {
+			return i
+		}
+	}
+
+	return -1
 }
 
 // RenderFinalizer calculates finalizer name
@@ -83,10 +62,19 @@ func RenderFinalizer(name string, extras ...string) string {
 	return finalizer
 }
 
-// RenderPVCName calculates PVC name
-func RenderPVCName(elems ...string) (string, error) {
+// RenderResourceName calculates resource name
+func RenderResourceName(prefix bool, elems ...string) (string, error) {
 	builder := strings.Builder{}
-	builder.WriteString("discoblocks")
+
+	if len(elems) == 0 {
+		return "", errors.New("missing name elements")
+	}
+
+	if prefix {
+		builder.WriteString("discoblocks")
+	} else {
+		builder.WriteString(elems[0])
+	}
 
 	for _, e := range elems {
 		hash, err := Hash(e)
@@ -97,37 +85,22 @@ func RenderPVCName(elems ...string) (string, error) {
 		builder.WriteString(fmt.Sprintf("-%d", hash))
 	}
 
-	return builder.String(), nil
-}
-
-// RenderMetricsService returns the metrics service
-func RenderMetricsService(name, namespace string) (*corev1.Service, error) {
-	service := corev1.Service{}
-	if err := yaml.Unmarshal([]byte(fmt.Sprintf(metricsServiceTemplate, name, namespace)), &service); err != nil {
-		return nil, err
+	l := builder.Len()
+	if l > maxName {
+		l = maxName
 	}
 
-	return &service, nil
+	return builder.String()[:l], nil
 }
 
-// RenderMetricsSidecar returns the metrics sidecar
-func RenderMetricsSidecar() (*corev1.Container, error) {
-	sidecar := corev1.Container{}
-	if err := yaml.Unmarshal([]byte(metricsTeamplate), &sidecar); err != nil {
-		return nil, err
+// RenderDiskConfigLabel renders DiskConfig label
+func RenderDiskConfigLabel(name string) string {
+	hash, err := Hash(name)
+	if err != nil {
+		panic("Unable to calculate hash, better to say good bye!")
 	}
 
-	return &sidecar, nil
-}
-
-// RenderManagerSidecar returns the manager sidecar
-func RenderManagerSidecar() (*corev1.Container, error) {
-	sidecar := corev1.Container{}
-	if err := yaml.Unmarshal([]byte(sidecarTeamplate), &sidecar); err != nil {
-		return nil, err
-	}
-
-	return &sidecar, nil
+	return fmt.Sprintf("discoblocks/%d", hash)
 }
 
 // IsContainsAll finds for a contains all b
@@ -140,6 +113,18 @@ func IsContainsAll(a, b map[string]string) bool {
 	}
 
 	return match == len(b)
+}
+
+// GetNamePrefix returns the prefix by availability type
+func GetNamePrefix(am discoblocksondatiov1.AvailabilityMode, uniquePerConfig string) string {
+	switch am {
+	case discoblocksondatiov1.ReadWriteOnce:
+		return time.Now().String()
+	case discoblocksondatiov1.ReadWriteSame:
+		return uniquePerConfig
+	default:
+		panic("Missing availability mode implementation: " + string(am))
+	}
 }
 
 // ParsePrometheusMetric parses Prometheus metrisc details
@@ -166,4 +151,24 @@ func ParsePrometheusMetricValue(metric string) (float64, error) {
 	f, _ := flt.Float64()
 
 	return f, err
+}
+
+// CompareStringNaturalOrder compares string in natural order
+func CompareStringNaturalOrder(a, b string) bool {
+	numberRegex := regexp.MustCompile(`\d+`)
+
+	convert := func(i string) string {
+		numbers := map[string]bool{}
+		for _, n := range numberRegex.FindAll([]byte(i), -1) {
+			numbers[string(n)] = true
+		}
+
+		for n := range numbers {
+			i = strings.ReplaceAll(i, n, fmt.Sprintf("%09s", n))
+		}
+
+		return i
+	}
+
+	return convert(a) < convert(b)
 }

@@ -79,7 +79,7 @@ patches:
         path: "/spec/template/spec/containers/0/env/0"
         value:
           name: SUPPORTED_CSI_DRIVERS
-          value: "ebs.csi.aws.com"
+          value: "ebs.csi.aws.com,csi.storageos.com"
     target:
       kind: Deployment
       namespace: system

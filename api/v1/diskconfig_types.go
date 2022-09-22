@@ -18,6 +18,7 @@ package v1
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -35,11 +36,11 @@ type DiskConfigSpec struct {
 
 	// Capacity represents the desired capacity of the underlying volume.
 	//+kubebuilder:default:="1Gi"
-	//+kubebuilder:validation:Pattern:="^(\\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$"
 	//+kubebuilder:validation:Optional
-	Capacity string `json:"capacity,omitempty" yaml:"capacity,omitempty"`
+	Capacity resource.Quantity `json:"capacity,omitempty" yaml:"capacity,omitempty"`
 
 	// MountPointPattern is the mount point of the disk. %d is optional and represents disk number in order. Will be automatically appended for second drive if missing.
+	// Reserved characters: ><|:&.+*!?^$()[]{}, only 1 %d allowed.
 	//+kubebuilder:default:="/media/discoblocks/<name>-%d"
 	//+kubebuilder:validation:Pattern:="^/(.*)"
 	//+kubebuilder:validation:Optional
@@ -52,7 +53,7 @@ type DiskConfigSpec struct {
 	AccessModes []corev1.PersistentVolumeAccessMode `json:"accessModes,omitempty" yaml:"accessModes,omitempty"`
 
 	// AvailabilityMode defines the desired number of instances.
-	//+kubebuilder:default:="Multiple"
+	//+kubebuilder:default:="ReadWriteOnce"
 	//+kubebuilder:validation:Optional
 	AvailabilityMode AvailabilityMode `json:"availabilityMode,omitempty" yaml:"availabilityMode,omitempty"`
 
@@ -78,17 +79,26 @@ type Policy struct {
 	UpscaleTriggerPercentage uint8 `json:"upscaleTriggerPercentage,omitempty" yaml:"upscaleTriggerPercentage,omitempty"`
 
 	// MaximumCapacityOfDisks defines maximum capacity of a disk.
-	//+kubebuilder:validation:Pattern:="^(\\d+)(m|Mi|g|Gi|t|Ti|p|Pi)$"
-	//+kubebuilder:default:="100Gi"
+	//+kubebuilder:default:="1000Gi"
 	//+kubebuilder:validation:Optional
-	MaximumCapacityOfDisk string `json:"maximumCapacityOfDisk,omitempty" yaml:"maximumCapacityOfDisk,omitempty"`
+	MaximumCapacityOfDisk resource.Quantity `json:"maximumCapacityOfDisk,omitempty" yaml:"maximumCapacityOfDisk,omitempty"`
 
 	// MaximumCapacityOfDisks defines maximum number of a disks.
-	//+kubebuilder:default:=10
+	//+kubebuilder:default:=1
 	//+kubebuilder:validation:Minimum:=1
-	//+kubebuilder:validation:Maximum:=1000
+	//+kubebuilder:validation:Maximum:=150
 	//+kubebuilder:validation:Optional
 	MaximumNumberOfDisks uint8 `json:"maximumNumberOfDisks,omitempty" yaml:"maximumNumberOfDisks,omitempty"`
+
+	// ExtendCapacity represents the capacity to extend with.
+	//+kubebuilder:default:="1Gi"
+	//+kubebuilder:validation:Optional
+	ExtendCapacity resource.Quantity `json:"extendCapacity,omitempty" yaml:"extendCapacity,omitempty"`
+
+	// CoolDown defines temporary pause of scaling.
+	//+kubebuilder:default:="5m"
+	//+kubebuilder:validation:Optional
+	CoolDown metav1.Duration `json:"coolDown,omitempty" yaml:"coolDown,omitempty"`
 
 	// Pause disables autoscaling of disks.
 	//+kubebuilder:default:=false
@@ -120,12 +130,12 @@ const (
 	Deleting Phase = "Deleting"
 )
 
-// +kubebuilder:validation:Enum=Singleton;Multiple
+// +kubebuilder:validation:Enum=ReadWriteSame;ReadWriteOnce
 type AvailabilityMode string
 
 const (
-	Singleton AvailabilityMode = "Singleton"
-	Multiple  AvailabilityMode = "Multiple"
+	ReadWriteSame AvailabilityMode = "ReadWriteSame"
+	ReadWriteOnce AvailabilityMode = "ReadWriteOnce"
 )
 
 //+kubebuilder:object:root=true

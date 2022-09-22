@@ -26,15 +26,6 @@ spec:
         runAsNonRoot: true
       serviceAccount: discoblocks-controller-manager
       serviceAccountName: discoblocks-controller-manager
-      volumes:
-      - name: cert
-        secret:
-          defaultMode: 420
-          secretName: webhook-server-cert
-      - configMap:
-          defaultMode: 420
-          name: discoblocks-scheduler
-        name: config-volume
 status:
   availableReplicas: 1
 ---

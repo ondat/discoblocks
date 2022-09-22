@@ -4,7 +4,7 @@ if [[ "$SKIP_GIT_PUSH_HOOK" ]]; then exit 0; fi
 
 set -e
 
-if [[ -n "$(git status --short)" ]]; then
+if git status --short | grep -qv "??"; then
     git stash
     function unstash() {
         git reset --hard
