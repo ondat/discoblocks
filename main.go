@@ -67,7 +67,7 @@ var (
 //+kubebuilder:rbac:groups="",resources=services,verbs=create;update;delete
 //+kubebuilder:rbac:groups="",resources=services/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=endpoints,verbs=list;watch
-//+kubebuilder:rbac:groups="",resources=pod,verbs=get
+//+kubebuilder:rbac:groups="",resources=pod,verbs=get;delete
 
 // indirect rbac
 //+kubebuilder:rbac:groups="",resources=namespaces;services;pods;persistentvolumes;replicationcontrollers,verbs=list;watch

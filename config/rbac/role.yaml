@@ -50,6 +50,7 @@ rules:
   resources:
   - pod
   verbs:
+  - delete
   - get
 - apiGroups:
   - ""

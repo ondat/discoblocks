@@ -2,7 +2,6 @@ apiVersion: discoblocks.ondat.io/v1
 kind: DiskConfig
 metadata:
   name: diskconfig-sample-storageos-same
-  namespace: default
   labels:
     discoblocks: ok
 spec:

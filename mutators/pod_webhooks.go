@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/moby/moby/pkg/namesgenerator"
@@ -51,29 +52,9 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		return admission.Errored(http.StatusBadRequest, fmt.Errorf("unable to decode request: %w", err))
 	}
 
-	if pod.Namespace == "" {
-		pod.Namespace = "default"
-	}
-
-	if pod.Name == "" {
-		if len(pod.OwnerReferences) == 0 {
-			pod.Name = fmt.Sprintf("%s-%d", namesgenerator.GetRandomName(0), time.Now().UnixNano())
-		} else {
-			nameParts := []string{pod.OwnerReferences[0].Name}
-			for _, r := range pod.OwnerReferences {
-				nameParts = append(nameParts, r.Name)
-			}
-			nameParts = append(nameParts, fmt.Sprintf("%d", time.Now().UnixNano()))
-
-			var err error
-			pod.Name, err = utils.RenderResourceName(false, nameParts...)
-			if err != nil {
-				return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to render resource name: %w", err))
-			}
-		}
-	}
-
-	logger = podMutatorLog.WithValues("name", pod.Name, "namespace", pod.Namespace)
+	// In some cases decoded pod doesn't have these fields
+	pod.Name = req.Name
+	pod.Namespace = req.Namespace
 
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
@@ -87,6 +68,10 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to fetch configs: %w", err))
 	}
 
+	if len(diskConfigs.Items) == 0 {
+		return admission.Allowed("DiskConfig not found in namespace: " + pod.Namespace)
+	}
+
 	errorMode := func(code int32, reason string, err error) admission.Response {
 		if a.strict {
 			return admission.Errored(code, err)
@@ -94,6 +79,8 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 		return admission.Allowed(reason)
 	}
+
+	nameGeneratorOnce := sync.Once{}
 
 	volumes := map[string]string{}
 	for i := range diskConfigs.Items {
@@ -113,6 +100,28 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 			msg := "Autoscaling and Pod.Spec.HostPID are not supported together"
 			logger.Info(msg)
 			return errorMode(http.StatusBadRequest, msg, errors.New(strings.ToLower(msg)))
+		}
+
+		if pod.Name == "" {
+			var nameGenErr error
+			nameGeneratorOnce.Do(func() {
+				if len(pod.OwnerReferences) == 0 {
+					pod.Name = fmt.Sprintf("%s-%d", namesgenerator.GetRandomName(0), time.Now().UnixNano())
+				} else {
+					nameParts := []string{pod.OwnerReferences[0].Name}
+					for _, r := range pod.OwnerReferences {
+						nameParts = append(nameParts, r.Name)
+					}
+					nameParts = append(nameParts, fmt.Sprintf("%d", time.Now().UnixNano()))
+
+					pod.Name, nameGenErr = utils.RenderResourceName(false, nameParts...)
+				}
+
+				logger = podMutatorLog.WithValues("name", pod.Name, "namespace", pod.Namespace)
+			})
+			if nameGenErr != nil {
+				return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to render resource name: %w", nameGenErr))
+			}
 		}
 
 		if pod.Labels == nil {
