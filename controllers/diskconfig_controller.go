@@ -65,7 +65,7 @@ type DiskConfigReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.11.0/pkg/reconcile
 func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx).WithName("DiskConfigReconciler").WithValues("name", req.Name, "namespace", req.Name)
+	logger := log.FromContext(ctx).WithName("DiskConfigReconciler").WithValues("req_name", req.Name, "namespace", req.Name)
 
 	lock, unlock := controllerSemaphore()
 	if !lock {

@@ -8,6 +8,8 @@ spec:
   storageClassName: storageos
   capacity: 1Gi
   availabilityMode: ReadWriteSame
+  accessModes:
+  - ReadWriteOnce
   mountPointPattern: /media/discoblocks/same-%d
   nodeSelector:
     matchLabels:

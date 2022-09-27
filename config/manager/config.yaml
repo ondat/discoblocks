@@ -13,6 +13,6 @@ data:
       plugins:
         filter:
           enabled:
-          - name: PodFilter
+          - name: PodScheduler
     leaderElection:
       leaderElect: false

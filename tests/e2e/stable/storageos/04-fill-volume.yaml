@@ -9,3 +9,4 @@ commands:
   - command: sleep 40
   - command: sh -c "kubectl exec $(kubectl get po --no-headers | tail -1 | awk '{print $1}') -- dd if=/dev/zero of=/media/discoblocks/same-1/data1 count=3000000"
   - command: sleep 40
+  - command: sh -c "kubectl exec -n kube-system $(kubectl get po -n kube-system -l name=fluentd-elasticsearch --no-headers | tail -1 | awk '{print $1}') -- touch /media/discoblocks/daemon-0/data0"
