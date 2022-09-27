@@ -67,7 +67,7 @@ var (
 //+kubebuilder:rbac:groups="",resources=services,verbs=create;update;delete
 //+kubebuilder:rbac:groups="",resources=services/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=endpoints,verbs=list;watch
-//+kubebuilder:rbac:groups="",resources=pod,verbs=get;delete
+//+kubebuilder:rbac:groups="",resources=pods,verbs=get;delete
 
 // indirect rbac
 //+kubebuilder:rbac:groups="",resources=namespaces;services;pods;persistentvolumes;replicationcontrollers,verbs=list;watch
@@ -162,9 +162,10 @@ func main() {
 	discoblocksondatiov1.InitDiskConfigWebhookDeps(mgr.GetClient(), provisioners)
 
 	if err = (&discoblocksondatiov1.DiskConfig{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "DiskConfig")
+		setupLog.Error(err, "unable to create validator", "validator", "DiskConfig")
 		os.Exit(1)
 	}
+
 	//+kubebuilder:scaffold:builder
 
 	strictMutator, err := parseBoolEnv("MUTATOR_STRICT_MODE")

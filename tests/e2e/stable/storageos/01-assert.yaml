@@ -39,6 +39,11 @@ metadata:
 webhooks:
 - admissionReviewVersions:
   - v1
+  clientConfig:
+    service:
+      name: discoblocks-webhook-service
+      namespace: kube-system
+      path: /mutate-v1-pod
   reinvocationPolicy: Never
   rules:
   - apiGroups:
@@ -50,4 +55,33 @@ webhooks:
     resources:
     - pods
     scope: '*'
+  sideEffects: NoneOnDryRun
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  labels:
+    app: discoblocks
+    app.kubernetes.io/component: discoblocks
+  name: discoblocks-validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: discoblocks-webhook-service
+      namespace: kube-system
+      path: /validate-discoblocks-ondat-io-v1-diskconfig
+  failurePolicy: Fail
+  name: validatediskconfig.kb.io
+  rules:
+  - apiGroups:
+    - discoblocks.ondat.io
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - diskconfigs
   sideEffects: None

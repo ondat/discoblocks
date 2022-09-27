@@ -18,28 +18,28 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-type podFilter struct {
+type podSCheduler struct {
 	client.Client
 	strict bool
 	logger logr.Logger
 }
 
 // Name returns the name of plugin
-func (s *podFilter) Name() string {
-	return "PodFilter"
+func (s *podSCheduler) Name() string {
+	return "PodScheduler"
 }
 
 // Filter does the filtering
-func (s *podFilter) Filter(ctx context.Context, state *framework.CycleState, pod *corev1.Pod, nodeInfo *framework.NodeInfo) *framework.Status {
-	logger := s.logger.WithValues("pod", pod.Name, "namespace", pod.Namespace, "node", nodeInfo.Node().Name)
+func (s *podSCheduler) Filter(ctx context.Context, state *framework.CycleState, pod *corev1.Pod, nodeInfo *framework.NodeInfo) *framework.Status {
+	logger := s.logger.WithValues("pod_name", pod.Name, "namespace", pod.Namespace, "node", nodeInfo.Node().Name)
 
 	errorStatus := framework.Success
 	if s.strict {
 		errorStatus = framework.Error
 	}
 
-	logger.Info("Scheduling...")
-	defer logger.Info("Scheduled")
+	logger.Info("Filtering...")
+	defer logger.Info("Filtered")
 
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
@@ -140,6 +140,6 @@ func (s *podFilter) Filter(ctx context.Context, state *framework.CycleState, pod
 }
 
 // Factory framework compatible factory
-func (s *podFilter) Factory(configuration runtime.Object, f framework.Handle) (framework.Plugin, error) {
+func (s *podSCheduler) Factory(configuration runtime.Object, f framework.Handle) (framework.Plugin, error) {
 	return s, nil
 }

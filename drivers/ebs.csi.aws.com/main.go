@@ -13,8 +13,8 @@ func main() {}
 func IsStorageClassValid() {
 	json := []byte(os.Getenv("STORAGE_CLASS_JSON"))
 
-	if fastjson.Exists(json, "volumeBindingMode") && fastjson.GetString(json, "volumeBindingMode") != "Immediate" {
-		fmt.Fprint(os.Stderr, "only volumeBindingMode Immediate is supported")
+	if !fastjson.Exists(json, "volumeBindingMode") || fastjson.GetString(json, "volumeBindingMode") != "WaitForFirstConsumer" {
+		fmt.Fprint(os.Stderr, "only volumeBindingMode WaitForFirstConsumer is supported")
 		fmt.Fprint(os.Stdout, false)
 		return
 	}

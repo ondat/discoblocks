@@ -1,0 +1,14 @@
+apiVersion: discoblocks.ondat.io/v1
+kind: DiskConfig
+metadata:
+  name: diskconfig-sample-storageos-daemon
+  namespace: kube-system
+  labels:
+    discoblocks: ok
+spec:
+  storageClassName: storageos
+  capacity: 1Gi
+  availabilityMode: ReadWriteDaemon
+  mountPointPattern: /media/discoblocks/daemon-%d
+  podSelector:
+    name: fluentd-elasticsearch

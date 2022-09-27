@@ -49,6 +49,7 @@ spec:
                 enum:
                 - ReadWriteSame
                 - ReadWriteOnce
+                - ReadWriteDaemon
                 type: string
               capacity:
                 anyOf:

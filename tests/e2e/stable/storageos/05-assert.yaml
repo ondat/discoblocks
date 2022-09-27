@@ -7,3 +7,13 @@ metadata:
   namespace: default
 status:
   availableReplicas: 1
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    k8s-app: fluentd-logging
+  name: fluentd-elasticsearch
+  namespace: kube-system
+status:
+  currentNumberScheduled: 1

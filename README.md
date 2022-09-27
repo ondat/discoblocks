@@ -46,14 +46,28 @@ When using such data management platform to overcome the block disk device limit
 - capacity management and monitoring
 - resizing and optimizing layouts related to capacity management
 - decommissioning the devices in secure way
+  - by default every resource created by DiscoBlocks has a finalizer, so deletion will be blocked until the corresponding DiskConfig has been deleted
+  - by default every additional disk has owner reference to the first disk ever created for pod, Deletion of first PVC terminates all other
 
 At the current stage, Discoblocks is leveraging the available hyperscaler CSI (Container Storage Interface) within the Kubernetes cluster to:
 - introduce a CRD (Custom Resource Definition) per workload with
+  - StorageClass name
   - capacity
   - mount path within the Pod 
   - nodeSelector
   - podSelector
-  - upscale policy 
+  - access modes: Access mode of PersistentVolume
+  - availability mode:
+    - ReadWriteOnce: New disk for each pod, including pod restart
+    - ReadWriteSame: All pod gets the same volume on the same node
+    - ReadWriteDaemon: DaemonSet pods always re-use existing volume on the same node
+  - upscale policy
+    - upscale trigger percentage
+    - maximum capacity of disk
+    - maximum number of disks per pod
+    - extend capacity
+    - cool down period after upscale
+    - pause autoscaling
 - provision the relevant disk device using the CSI (like EBS on AWS) when the workload deployment will happen
 - monitor the volume(s)
 - resize automatically the volume based on the upscale policy
