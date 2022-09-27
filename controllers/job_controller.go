@@ -36,7 +36,7 @@ type JobReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.11.0/pkg/reconcile
 func (r *JobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx).WithName("JobReconciler").WithValues("name", req.Name, "namespace", req.Name)
+	logger := log.FromContext(ctx).WithName("JobReconciler").WithValues("req_name", req.Name, "namespace", req.Name)
 
 	logger.Info("Reconcile job...")
 	defer logger.Info("Reconciled")
@@ -60,14 +60,14 @@ func (r *JobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	}
 
 	for i := range podList.Items {
-		logger.Info("Delete Pod...", "name", podList.Items[i].Name)
+		logger.Info("Delete Pod...", "pod_name", podList.Items[i].Name)
 
 		if err := r.Client.Delete(ctx, &podList.Items[i]); err != nil {
 			if apierrors.IsNotFound(err) {
 				continue
 			}
 
-			logger.Info("Failed to delete pod", "name", podList.Items[i].Name, "error", err.Error())
+			logger.Info("Failed to delete pod", "pod_name", podList.Items[i].Name, "error", err.Error())
 			return ctrl.Result{}, fmt.Errorf("unable to delete pod %s: %w", podList.Items[i].Name, err)
 		}
 	}

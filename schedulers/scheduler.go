@@ -30,13 +30,13 @@ func (s *Scheduler) Start(ctx context.Context) <-chan error {
 		defer s.logger.Info("Plugin stop")
 		defer close(errChan)
 
-		podFilterPlugin := podFilter{
+		podSchedulerPlugin := podSCheduler{
 			Client: s.Client,
 			strict: s.strict,
 			logger: s.logger.WithName("Pod"),
 		}
 
-		command := scheduler.NewSchedulerCommand(scheduler.WithPlugin(podFilterPlugin.Name(), podFilterPlugin.Factory))
+		command := scheduler.NewSchedulerCommand(scheduler.WithPlugin(podSchedulerPlugin.Name(), podSchedulerPlugin.Factory))
 		command.SetOut(&logWriter{s.logger})
 		command.SetErr(os.Stderr)
 		command.SetArgs([]string{"--config=/etc/kubernetes/discoblocks-scheduler/scheduler-config.yaml"})

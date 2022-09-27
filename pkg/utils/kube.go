@@ -8,6 +8,7 @@ import (
 
 	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
 	"github.com/ondat/discoblocks/pkg/drivers"
+	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/yaml"
@@ -177,4 +178,35 @@ func NewPVC(config *discoblocksondatiov1.DiskConfig, prefix string, driver *driv
 	}
 
 	return pvc, nil
+}
+
+// IsOwnedByDaemonSet detects is parent DaemonSet
+func IsOwnedByDaemonSet(pod *corev1.Pod) bool {
+	for i := range pod.OwnerReferences {
+		if pod.OwnerReferences[i].Kind == "DaemonSet" && pod.OwnerReferences[i].APIVersion == appsv1.SchemeGroupVersion.String() {
+			return true
+		}
+	}
+
+	return false
+}
+
+// GetTargetNodeByAffinity tries to find node by affinity
+func GetTargetNodeByAffinity(affinit *corev1.Affinity) string {
+	if affinit == nil ||
+		affinit.NodeAffinity == nil ||
+		affinit.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		return ""
+	}
+
+	for _, term := range affinit.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+		for _, mf := range term.MatchFields {
+			if mf.Key == "metadata.name" && mf.Operator == corev1.NodeSelectorOpIn && len(mf.Values) > 0 {
+				// DeamonSet controller sets only one: https://sourcegraph.com/github.com/kubernetes/kubernetes@edd677694374fb8284b9ddd04caf0698eaf00de5/-/blob/pkg/controller/daemon/util/daemonset_util.go?L216
+				return mf.Values[0]
+			}
+		}
+	}
+
+	return ""
 }

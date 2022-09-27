@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/moby/moby/pkg/namesgenerator"
@@ -31,24 +30,27 @@ import (
 // log is for logging in this package
 var podMutatorLog = logf.Log.WithName("mutators.PodMutator")
 
+var _ admission.Handler = &PodMutator{}
+
 type PodMutator struct {
 	Client  client.Client
 	strict  bool
 	decoder *admission.Decoder
 }
 
-//+kubebuilder:webhook:path=/mutate-v1-pod,mutating=true,sideEffects=none,failurePolicy=fail,groups="",resources=pods,verbs=create,versions=v1,admissionReviewVersions=v1,name=mpod.kb.io
+//+kubebuilder:webhook:path=/mutate-v1-pod,mutating=true,sideEffects=NoneOnDryRun,failurePolicy=fail,groups="",resources=pods,verbs=create,versions=v1,admissionReviewVersions=v1,name=mpod.kb.io
 
 // Handle pod mutation
 //nolint:gocyclo // It is complex we know
 func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admission.Response {
-	logger := podMutatorLog.WithValues("req_name", req.Name, "req_namespace", req.Namespace)
+	logger := podMutatorLog.WithValues("req_name", req.Name, "namespace", req.Namespace)
 
 	logger.Info("Handling...")
 	defer logger.Info("Handled")
 
 	pod := corev1.Pod{}
-	if err := a.decoder.Decode(req, &pod); err != nil {
+	if err := a.decoder.DecodeRaw(req.Object, &pod); err != nil {
+		logger.Info("Unable to decode request", "error", err.Error())
 		return admission.Errored(http.StatusBadRequest, fmt.Errorf("unable to decode request: %w", err))
 	}
 
@@ -65,7 +67,8 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 	if err := a.Client.List(ctx, &diskConfigs, &client.ListOptions{
 		Namespace: pod.Namespace,
 	}); err != nil {
-		return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to fetch configs: %w", err))
+		logger.Info("Unable to fetch DiskConfigs", "error", err.Error())
+		return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to fetch DiskConfigs: %w", err))
 	}
 
 	if len(diskConfigs.Items) == 0 {
@@ -80,21 +83,23 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		return admission.Allowed(reason)
 	}
 
-	nameGeneratorOnce := sync.Once{}
+	nodeName := utils.GetTargetNodeByAffinity(pod.Spec.Affinity)
+
+	logger = logger.WithValues("node_name", nodeName)
+
+	diskConfigTypes := map[discoblocksondatiov1.AvailabilityMode]bool{}
 
 	volumes := map[string]string{}
 	for i := range diskConfigs.Items {
 		if diskConfigs.Items[i].DeletionTimestamp != nil {
 			continue
+		} else if !utils.IsContainsAll(pod.Labels, diskConfigs.Items[i].Spec.PodSelector) {
+			continue
 		}
 
 		config := diskConfigs.Items[i]
 
-		if !utils.IsContainsAll(pod.Labels, config.Spec.PodSelector) {
-			continue
-		}
-
-		logger := logger.WithValues("name", config.Name, "sc_name", config.Spec.StorageClassName)
+		logger := logger.WithValues("dc_name", config.Name, "sc_name", config.Spec.StorageClassName)
 
 		if pod.Spec.HostPID && !config.Spec.Policy.Pause {
 			msg := "Autoscaling and Pod.Spec.HostPID are not supported together"
@@ -102,32 +107,48 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 			return errorMode(http.StatusBadRequest, msg, errors.New(strings.ToLower(msg)))
 		}
 
-		if pod.Name == "" {
-			var nameGenErr error
-			nameGeneratorOnce.Do(func() {
-				if len(pod.OwnerReferences) == 0 {
-					pod.Name = fmt.Sprintf("%s-%d", namesgenerator.GetRandomName(0), time.Now().UnixNano())
-				} else {
-					nameParts := []string{pod.OwnerReferences[0].Name}
-					for _, r := range pod.OwnerReferences {
-						nameParts = append(nameParts, r.Name)
-					}
-					nameParts = append(nameParts, fmt.Sprintf("%d", time.Now().UnixNano()))
+		if config.Spec.AvailabilityMode == discoblocksondatiov1.ReadWriteDaemon {
+			if nodeName == "" {
+				msg := "Node name not found for ReadWriteDaemons at node affinities"
+				logger.Info(msg)
+				return errorMode(http.StatusBadRequest, msg, errors.New(strings.ToLower(msg)))
+			}
 
-					pod.Name, nameGenErr = utils.RenderResourceName(false, nameParts...)
+			if diskConfigTypes[discoblocksondatiov1.ReadWriteSame] {
+				msg := "ReadWriteDaemon and ReadWriteSame are not supported together"
+				logger.Info(msg)
+				return errorMode(http.StatusBadRequest, msg, errors.New(strings.ToLower(msg)))
+			}
+			diskConfigTypes[config.Spec.AvailabilityMode] = true
+
+			if !utils.IsOwnedByDaemonSet(&pod) {
+				msg := "ReadWriteDaemon supports only apps/v1.DaemonSets"
+				logger.Info(msg)
+				return errorMode(http.StatusBadRequest, msg, errors.New(strings.ToLower(msg)))
+			}
+		}
+
+		if pod.Name == "" {
+			if len(pod.OwnerReferences) == 0 {
+				pod.Name = fmt.Sprintf("%s-%d", namesgenerator.GetRandomName(0), time.Now().UnixNano())
+			} else {
+				nameParts := []string{pod.OwnerReferences[0].Name, namesgenerator.GetRandomName(0)}
+				for _, r := range pod.OwnerReferences {
+					nameParts = append(nameParts, r.Name)
 				}
 
-				logger = podMutatorLog.WithValues("name", pod.Name, "namespace", pod.Namespace)
-			})
-			if nameGenErr != nil {
-				return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to render resource name: %w", nameGenErr))
+				var err error
+				pod.Name, err = utils.RenderResourceName(false, nameParts...)
+				if err != nil {
+					return errorMode(http.StatusInternalServerError, "Unable to render resource name: "+err.Error(), fmt.Errorf("unable to render resource name: %w", err))
+				}
 			}
 		}
 
 		if pod.Labels == nil {
 			pod.Labels = map[string]string{}
 		}
-		pod.Labels[utils.RenderDiskConfigLabel(config.Name)] = config.Name
+		pod.Labels[utils.RenderUniqueLabel(config.Name)] = config.Name
 		pod.Labels["discoblocks-metrics"] = pod.Name
 
 		logger.Info("Fetch StorageClass...")
@@ -136,7 +157,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		if err := a.Client.Get(ctx, types.NamespacedName{Name: config.Spec.StorageClassName}, &sc); err != nil {
 			if apierrors.IsNotFound(err) {
 				logger.Info("StorageClass not found", "name", config.Spec.StorageClassName)
-				return errorMode(http.StatusNotFound, "StorageClass not found: "+config.Spec.StorageClassName, err)
+				return admission.Errored(http.StatusNotFound, err)
 			}
 			logger.Info("Unable to fetch StorageClass", "error", err.Error())
 			return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to fetch StorageClass: %w", err))
@@ -151,12 +172,12 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 		logger.Info("Attach volume to workload...")
 
-		prefix := utils.GetNamePrefix(config.Spec.AvailabilityMode, config.CreationTimestamp.String())
+		prefix := utils.GetNamePrefix(config.Spec.AvailabilityMode, string(config.UID), nodeName)
 
 		var pvc *corev1.PersistentVolumeClaim
 		pvc, err := utils.NewPVC(&config, prefix, driver)
 		if err != nil {
-			return errorMode(http.StatusInternalServerError, err.Error(), err)
+			return admission.Errored(http.StatusInternalServerError, err)
 		}
 		logger = logger.WithValues("pvc_name", pvc.Name)
 
@@ -164,58 +185,61 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 			pvc.Name: utils.RenderMountPoint(config.Spec.MountPointPattern, pvc.Name, 0),
 		}
 
-		logger.Info("Create PVC...")
-		if err = a.Client.Create(ctx, pvc); err != nil {
-			if !apierrors.IsAlreadyExists(err) {
-				logger.Info("Failed to create PVC", "error", err.Error())
-				return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to create PVC: %w", err))
-			}
+		if req.DryRun == nil || !*req.DryRun {
+			logger.Info("Create PVC...")
 
-			logger.Info("PVC already exists")
-
-			if config.Spec.AvailabilityMode != discoblocksondatiov1.ReadWriteOnce {
-				label, err := labels.NewRequirement("discoblocks-parent", selection.Equals, []string{pvc.Name})
-				if err != nil {
-					logger.Error(err, "Unable to parse PVC label selector")
-					return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to parse PVC label selectors: %w", err))
-				}
-				pvcSelector := labels.NewSelector().Add(*label)
-
-				logger.Info("Fetch PVCs...")
-
-				pvcs := corev1.PersistentVolumeClaimList{}
-				if err = a.Client.List(ctx, &pvcs, &client.ListOptions{
-					Namespace:     config.Namespace,
-					LabelSelector: pvcSelector,
-				}); err != nil {
-					logger.Error(err, "Unable to fetch PVCs")
-					return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to fetch PVCs: %w", err))
+			if err = a.Client.Create(ctx, pvc); err != nil {
+				if !apierrors.IsAlreadyExists(err) {
+					logger.Info("Failed to create PVC", "error", err.Error())
+					return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to create PVC: %w", err))
 				}
 
-				sort.Slice(pvcs.Items, func(i, j int) bool {
-					return pvcs.Items[i].CreationTimestamp.UnixNano() < pvcs.Items[j].CreationTimestamp.UnixNano()
-				})
+				logger.Info("PVC already exists")
 
-				for i := range pvcs.Items {
-					if pvcs.Items[i].DeletionTimestamp != nil || !controllerutil.ContainsFinalizer(&pvcs.Items[i], utils.RenderFinalizer(config.Name)) {
-						continue
-					}
-
-					if _, ok := pvcs.Items[i].Labels["discoblocks-index"]; !ok {
-						err = errors.New("volume index not found")
-						logger.Error(err, "Volume index not found")
-						return admission.Errored(http.StatusInternalServerError, err)
-					}
-
-					index, err := strconv.Atoi(pvcs.Items[i].Labels["discoblocks-index"])
+				if config.Spec.AvailabilityMode != discoblocksondatiov1.ReadWriteOnce {
+					label, err := labels.NewRequirement("discoblocks-parent", selection.Equals, []string{pvc.Name})
 					if err != nil {
-						logger.Error(err, "Unable to convert index")
-						return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to convert index: %w", err))
+						logger.Error(err, "Unable to parse PVC label selector")
+						return errorMode(http.StatusInternalServerError, "Unable to parse PVC label selectors: discoblocks-parent="+pvc.Name, fmt.Errorf("unable to parse PVC label selectors: %w", err))
+					}
+					pvcSelector := labels.NewSelector().Add(*label)
+
+					logger.Info("Fetch PVCs...")
+
+					pvcs := corev1.PersistentVolumeClaimList{}
+					if err = a.Client.List(ctx, &pvcs, &client.ListOptions{
+						Namespace:     config.Namespace,
+						LabelSelector: pvcSelector,
+					}); err != nil {
+						logger.Error(err, "Unable to fetch PVCs")
+						return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to fetch PVCs: %w", err))
 					}
 
-					pvcNamesWithMount[pvcs.Items[i].Name] = utils.RenderMountPoint(config.Spec.MountPointPattern, pvcs.Items[i].Name, index)
+					sort.Slice(pvcs.Items, func(i, j int) bool {
+						return pvcs.Items[i].CreationTimestamp.UnixNano() < pvcs.Items[j].CreationTimestamp.UnixNano()
+					})
 
-					logger.Info("Volume found", "pvc_name", pvcs.Items[i].Name, "mountpoint", pvcNamesWithMount[pvcs.Items[i].Name])
+					for i := range pvcs.Items {
+						if pvcs.Items[i].DeletionTimestamp != nil || !controllerutil.ContainsFinalizer(&pvcs.Items[i], utils.RenderFinalizer(config.Name)) {
+							continue
+						}
+
+						if _, ok := pvcs.Items[i].Labels["discoblocks-index"]; !ok {
+							err = errors.New("volume index not found")
+							logger.Error(err, "Volume index not found")
+							return errorMode(http.StatusInternalServerError, "Volume index not found", err)
+						}
+
+						index, err := strconv.Atoi(pvcs.Items[i].Labels["discoblocks-index"])
+						if err != nil {
+							logger.Error(err, "Unable to convert index")
+							return errorMode(http.StatusInternalServerError, "Unable to convert index: "+pvcs.Items[i].Labels["discoblocks-index"], fmt.Errorf("unable to convert index: %w", err))
+						}
+
+						pvcNamesWithMount[pvcs.Items[i].Name] = utils.RenderMountPoint(config.Spec.MountPointPattern, pvcs.Items[i].Name, index)
+
+						logger.Info("Volume found", "pvc_name", pvcs.Items[i].Name, "mountpoint", pvcNamesWithMount[pvcs.Items[i].Name])
+					}
 				}
 			}
 		}
@@ -247,7 +271,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 	pod.Spec.SchedulerName = "discoblocks-scheduler"
 
-	logger.Info("Attach sidecars...")
+	logger.Info("Attach sidecar...")
 
 	metricsSideCar, err := utils.RenderMetricsSidecar()
 	if err != nil {

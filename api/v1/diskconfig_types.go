@@ -130,12 +130,13 @@ const (
 	Deleting Phase = "Deleting"
 )
 
-// +kubebuilder:validation:Enum=ReadWriteSame;ReadWriteOnce
+// +kubebuilder:validation:Enum=ReadWriteSame;ReadWriteOnce;ReadWriteDaemon
 type AvailabilityMode string
 
 const (
-	ReadWriteSame AvailabilityMode = "ReadWriteSame"
-	ReadWriteOnce AvailabilityMode = "ReadWriteOnce"
+	ReadWriteSame   AvailabilityMode = "ReadWriteSame"
+	ReadWriteOnce   AvailabilityMode = "ReadWriteOnce"
+	ReadWriteDaemon AvailabilityMode = "ReadWriteDaemon"
 )
 
 //+kubebuilder:object:root=true

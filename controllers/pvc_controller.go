@@ -71,7 +71,7 @@ type PVCReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.11.0/pkg/reconcile
 func (r *PVCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := logf.FromContext(ctx).WithName("PVCReconciler").WithValues("name", req.Name, "namespace", req.Name)
+	logger := logf.FromContext(ctx).WithName("PVCReconciler").WithValues("req_name", req.Name, "namespace", req.Name)
 
 	lock, unlock := controllerSemaphore()
 	if !lock {
@@ -456,7 +456,7 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, paren
 	sc := storagev1.StorageClass{}
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: config.Spec.StorageClassName}, &sc); err != nil {
 		if apierrors.IsNotFound(err) {
-			logger.Error(err, "StorageClass not found", "name", config.Spec.StorageClassName)
+			logger.Error(err, "StorageClass not found", "sc_name", config.Spec.StorageClassName)
 			return
 		}
 		logger.Error(err, "Unable to fetch StorageClass")
@@ -470,7 +470,7 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, paren
 		return
 	}
 
-	prefix := utils.GetNamePrefix(discoblocksondatiov1.ReadWriteOnce, "")
+	prefix := utils.GetNamePrefix(discoblocksondatiov1.ReadWriteOnce, string(config.UID), nodeName)
 
 	pvc, err := utils.NewPVC(config, prefix, driver)
 	if err != nil {
@@ -515,7 +515,7 @@ WAIT_PVC:
 				break WAIT_PVC
 			}
 
-			<-time.NewTicker(time.Second).C
+			<-time.NewTimer(time.Second).C
 		}
 	}
 
@@ -583,7 +583,7 @@ WAIT_VA:
 			if err = r.Get(ctx, types.NamespacedName{Name: vaName}, volumeAttachment); err != nil ||
 				!volumeAttachment.Status.Attached ||
 				waitForMeta != "" && volumeAttachment.Status.AttachmentMetadata[waitForMeta] == "" {
-				<-time.NewTicker(time.Second).C
+				<-time.NewTimer(time.Second).C
 
 				continue
 			}
@@ -633,7 +633,7 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 	sc := storagev1.StorageClass{}
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: config.Spec.StorageClassName}, &sc); err != nil {
 		if apierrors.IsNotFound(err) {
-			logger.Error(err, "StorageClass not found", "name", config.Spec.StorageClassName)
+			logger.Error(err, "StorageClass not found", "sc_name", config.Spec.StorageClassName)
 			return
 		}
 		logger.Error(err, "Unable to fetch StorageClass")

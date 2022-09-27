@@ -51,7 +51,7 @@ func (r *DiskConfig) SetupWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-//+kubebuilder:webhook:path=/validate-discoblocks-ondat-io-v1-diskconfig,mutating=false,failurePolicy=fail,sideEffects=None,groups=discoblocks.ondat.io,resources=diskconfigs,verbs=create;update;delete,versions=v1,name=validatediskconfig.kb.io,admissionReviewVersions=v1
+//+kubebuilder:webhook:path=/validate-discoblocks-ondat-io-v1-diskconfig,mutating=false,failurePolicy=fail,sideEffects=None,groups=discoblocks.ondat.io,resources=diskconfigs,verbs=create;update,versions=v1,name=validatediskconfig.kb.io,admissionReviewVersions=v1
 
 var _ webhook.Validator = &DiskConfig{}
 
@@ -66,7 +66,7 @@ func (r *DiskConfig) ValidateUpdate(old runtime.Object) error {
 }
 
 func (r *DiskConfig) validate(old runtime.Object) error {
-	logger := diskConfigLog.WithValues("name", r.Name, "namespace", r.Namespace)
+	logger := diskConfigLog.WithValues("dc_name", r.Name, "namespace", r.Namespace)
 
 	logger.Info("Validate update...")
 	defer logger.Info("Validated")
@@ -161,8 +161,6 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
 func (r *DiskConfig) ValidateDelete() error {
-	diskConfigLog.Info("validate delete", "name", r.Name)
-
 	return nil
 }
 

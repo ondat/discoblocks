@@ -93,8 +93,8 @@ func RenderResourceName(prefix bool, elems ...string) (string, error) {
 	return builder.String()[:l], nil
 }
 
-// RenderDiskConfigLabel renders DiskConfig label
-func RenderDiskConfigLabel(name string) string {
+// RenderUniqueLabel renders DiskConfig label
+func RenderUniqueLabel(name string) string {
 	hash, err := Hash(name)
 	if err != nil {
 		panic("Unable to calculate hash, better to say good bye!")
@@ -116,12 +116,14 @@ func IsContainsAll(a, b map[string]string) bool {
 }
 
 // GetNamePrefix returns the prefix by availability type
-func GetNamePrefix(am discoblocksondatiov1.AvailabilityMode, uniquePerConfig string) string {
+func GetNamePrefix(am discoblocksondatiov1.AvailabilityMode, configUID, nodeName string) string {
 	switch am {
 	case discoblocksondatiov1.ReadWriteOnce:
 		return time.Now().String()
 	case discoblocksondatiov1.ReadWriteSame:
-		return uniquePerConfig
+		return configUID
+	case discoblocksondatiov1.ReadWriteDaemon:
+		return nodeName
 	default:
 		panic("Missing availability mode implementation: " + string(am))
 	}
