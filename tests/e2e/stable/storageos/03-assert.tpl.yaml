@@ -173,25 +173,7 @@ metadata:
 spec:
   containers:
   - image: nginx:1.23
-  # Order of mounts is not guaranteed
-  #   volumeMounts:
-  #   - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
-  #   - mountPath: /media/discoblocks/same-0
-  #   - mountPath: /media/discoblocks/once-0
-  # - image: bitnami/node-exporter:1.3.1
-  #   volumeMounts:
-  #   - mountPath: /media/discoblocks/once-0
-  #   - mountPath: /media/discoblocks/same-0
-  #   - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
-  volumes:
-  - projected:
-      defaultMode: 420
-  - name: #PVC_ONCE_NAME#
-    persistentVolumeClaim:
-      claimName: #PVC_ONCE_NAME#
-  - name: #PVC_SAME_NAME#
-    persistentVolumeClaim:
-      claimName: #PVC_SAME_NAME#
+  - image: bitnami/node-exporter:1.3.1
 status:
   phase: Running
 ---
