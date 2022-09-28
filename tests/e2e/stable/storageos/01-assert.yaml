@@ -39,6 +39,11 @@ metadata:
 webhooks:
 - admissionReviewVersions:
   - v1
+  clientConfig:
+    service:
+      name: discoblocks-webhook-service
+      namespace: kube-system
+      path: /mutate-v1-pod
   reinvocationPolicy: Never
   rules:
   - apiGroups:
@@ -64,8 +69,8 @@ webhooks:
   - v1
   clientConfig:
     service:
-      name: webhook-service
-      namespace: system
+      name: discoblocks-webhook-service
+      namespace: kube-system
       path: /validate-discoblocks-ondat-io-v1-diskconfig
   failurePolicy: Fail
   name: validatediskconfig.kb.io
