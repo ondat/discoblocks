@@ -35,7 +35,7 @@ metadata:
   labels:
     app: discoblocks
     app.kubernetes.io/component: discoblocks
-  name: mutating-webhook-configuration
+  name: discoblocks-mutating-webhook-configuration
 webhooks:
 - admissionReviewVersions:
   - v1
@@ -58,7 +58,7 @@ metadata:
   labels:
     app: discoblocks
     app.kubernetes.io/component: discoblocks
-  name: validating-webhook-configuration
+  name: discoblocks-validating-webhook-configuration
 webhooks:
 - admissionReviewVersions:
   - v1
