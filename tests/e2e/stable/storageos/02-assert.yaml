@@ -48,7 +48,7 @@ spec:
   storageClassName: storageos
   capacity: 1Gi
   availabilityMode: ReadWriteDaemon
-  mountPointPattern: /media/discoblocks/same-%d
+  mountPointPattern: /media/discoblocks/daemon-%d
   podSelector:
     name: fluentd-elasticsearch
 ---
