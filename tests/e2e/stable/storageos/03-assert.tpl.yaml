@@ -77,6 +77,54 @@ status:
   phase: Bound
 ---
 apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  annotations:
+    pv.kubernetes.io/bind-completed: "yes"
+    pv.kubernetes.io/bound-by-controller: "yes"
+    volume.beta.kubernetes.io/storage-provisioner: csi.storageos.com
+    volume.kubernetes.io/storage-provisioner: csi.storageos.com
+  finalizers:
+  - discoblocks.io/diskconfig-sample-storageos-daemon
+  - kubernetes.io/pvc-protection
+  labels:
+    discoblocks: diskconfig-sample-storageos-daemon
+  name: #PVC_DAEMON_NAME#
+  namespace: default
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: storageos
+  volumeMode: Filesystem
+status:
+  accessModes:
+  - ReadWriteOnce
+  capacity:
+    storage: 1Gi
+  phase: Bound
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  finalizers:
+  - kubernetes.io/pv-protection
+  - external-attacher/csi-storageos-com
+  name: #PV_ONCE_NAME#
+spec:
+  accessModes:
+  - ReadWriteOnce
+  capacity:
+    storage: 1Gi
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: storageos
+  volumeMode: Filesystem
+status:
+  phase: Bound
+---
+apiVersion: v1
 kind: PersistentVolume
 metadata:
   finalizers:
@@ -86,6 +134,24 @@ metadata:
 spec:
   accessModes:
   - ReadWriteOnce
+  capacity:
+    storage: 1Gi
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: storageos
+  volumeMode: Filesystem
+status:
+  phase: Bound
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  finalizers:
+  - kubernetes.io/pv-protection
+  - external-attacher/csi-storageos-com
+  name: #PV_DAEMON_NAME#
+spec:
+  accessModes:
+  - ReadWriteMany
   capacity:
     storage: 1Gi
   persistentVolumeReclaimPolicy: Delete

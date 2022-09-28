@@ -2,3 +2,4 @@ apiVersion: kuttl.dev/v1beta1
 kind: TestStep
 commands:
   - command: sh -c "kubectl delete po $(kubectl get po -l app=nginx --no-headers -o custom-columns=":metadata.name")"
+  - command: sh -c "kubectl delete po -n kube-system $(kubectl get po -n kube-system -l name=fluentd-elasticsearch --no-headers -o custom-columns=":metadata.name")"

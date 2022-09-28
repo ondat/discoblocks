@@ -39,6 +39,19 @@ spec:
     maximumNumberOfDisks: 2
     coolDown: 1s
 ---
+apiVersion: discoblocks.ondat.io/v1
+kind: DiskConfig
+metadata:
+  name: diskconfig-sample-storageos-daemon
+  namespace: kube-system
+spec:
+  storageClassName: storageos
+  capacity: 1Gi
+  availabilityMode: ReadWriteDaemon
+  mountPointPattern: /media/discoblocks/same-%d
+  podSelector:
+    name: fluentd-elasticsearch
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -48,3 +61,13 @@ metadata:
   namespace: default
 status:
   availableReplicas: 1
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    k8s-app: fluentd-logging
+  name: fluentd-elasticsearch
+  namespace: kube-system
+status:
+  currentNumberScheduled: 1
