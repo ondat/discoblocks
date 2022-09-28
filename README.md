@@ -46,7 +46,7 @@ When using such data management platform to overcome the block disk device limit
 - capacity management and monitoring
 - resizing and optimizing layouts related to capacity management
 - decommissioning the devices in secure way
-  - by default every resource created by DiscoBlock has a finalizer, so resource deletion would be on hold by Kubernetes until corresponding DiskConfig is exists
+  - by default every resource created by DiscoBlocks has a finalizer, so deletion will be blocked until the corresponding DiskConfig has been deleted
   - by default every additional disk has owner reference to the first disk ever created for pod, Deletion of first PVC terminates all other
 
 At the current stage, Discoblocks is leveraging the available hyperscaler CSI (Container Storage Interface) within the Kubernetes cluster to:
