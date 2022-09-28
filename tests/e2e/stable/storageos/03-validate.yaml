@@ -7,8 +7,8 @@ commands:
       -e "s/#PV_ONCE_NAME#/$(kubectl get pvc -l discoblocks=diskconfig-sample-storageos-once --no-headers -o custom-columns=":spec.volumeName")/" \
       -e "s/#PVC_SAME_NAME#/$(kubectl get pvc -l discoblocks=diskconfig-sample-storageos-same --no-headers -o custom-columns=":metadata.name")/" \
       -e "s/#PV_SAME_NAME#/$(kubectl get pvc -l discoblocks=diskconfig-sample-storageos-same --no-headers -o custom-columns=":spec.volumeName")/" \
-      -e "s/#PVC_DAEMON_NAME#/$(kubectl get pvc -l discoblocks=diskconfig-sample-storageos-daemon --no-headers -o custom-columns=":metadata.name")/" \
-      -e "s/#PV_DAEMON_NAME#/$(kubectl get pvc -l discoblocks=diskconfig-sample-storageos-daemon --no-headers -o custom-columns=":spec.volumeName")/" \
+      -e "s/#PVC_DAEMON_NAME#/$(kubectl get pvc -n kube-system -l discoblocks=diskconfig-sample-storageos-daemon --no-headers -o custom-columns=":metadata.name")/" \
+      -e "s/#PV_DAEMON_NAME#/$(kubectl get pvc -n kube-system -l discoblocks=diskconfig-sample-storageos-daemon --no-headers -o custom-columns=":spec.volumeName")/" \
       -e "s/#POD_NAME#/$(kubectl get po -l app=nginx --no-headers -o custom-columns=":metadata.name")/" \
       -e "s/#SERVICE_NAME#/$(kubectl get service -l discoblocks --no-headers -o custom-columns=":metadata.name")/" \
       > workload/00-assert.yaml'
