@@ -19,7 +19,6 @@ package v1
 import (
 	"errors"
 	"fmt"
-	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -92,11 +91,6 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 			err := errors.New("invalid old object")
 			logger.Error(err, "this should not happen")
 			return err
-		}
-
-		if !reflect.DeepEqual(oldDC.Spec.AccessModes, r.Spec.AccessModes) {
-			logger.Info("AccessModes is immutable")
-			return errors.New("access modes is immutable field")
 		}
 
 		if oldDC.Spec.StorageClassName != r.Spec.StorageClassName {

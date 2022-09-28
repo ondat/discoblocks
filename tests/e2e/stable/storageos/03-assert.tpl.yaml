@@ -133,7 +133,7 @@ metadata:
   name: #PV_SAME_NAME#
 spec:
   accessModes:
-  - ReadWriteOnce
+  - ReadWriteMany
   capacity:
     storage: 1Gi
   persistentVolumeReclaimPolicy: Delete
@@ -151,7 +151,7 @@ metadata:
   name: #PV_DAEMON_NAME#
 spec:
   accessModes:
-  - ReadWriteMany
+  - ReadWriteOnce
   capacity:
     storage: 1Gi
   persistentVolumeReclaimPolicy: Delete
