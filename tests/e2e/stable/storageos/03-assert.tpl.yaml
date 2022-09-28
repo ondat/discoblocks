@@ -90,7 +90,7 @@ metadata:
   labels:
     discoblocks: diskconfig-sample-storageos-daemon
   name: #PVC_DAEMON_NAME#
-  namespace: default
+  namespace: kube-system
 spec:
   accessModes:
   - ReadWriteOnce
