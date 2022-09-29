@@ -9,7 +9,7 @@ spec:
   capacity: 1Gi
   availabilityMode: ReadWriteSame
   accessModes:
-  - ReadOnlyMany
+  - ReadWriteOnce
   mountPointPattern: /media/discoblocks/same-%d
   nodeSelector:
     matchLabels:

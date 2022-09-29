@@ -133,7 +133,7 @@ metadata:
   name: #PV_SAME_NAME#
 spec:
   accessModes:
-  - ReadOnlyMany
+  - ReadWriteOnce
   capacity:
     storage: 1Gi
   persistentVolumeReclaimPolicy: Delete
