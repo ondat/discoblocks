@@ -3,7 +3,7 @@ kind: TestSuite
 testDirs:
 - ./tests/e2e/stable
 kindConfig: tests/e2e/kind/kind-config-1.23.yaml
-startKIND: false
+startKIND: true
 kindContainers:
   - local/discoblocks:e2e
 timeout: 400
