@@ -58,19 +58,17 @@ var (
 //+kubebuilder:rbac:groups=discoblocks.ondat.io,resources=diskconfigs/status,verbs=update
 //+kubebuilder:rbac:groups=discoblocks.ondat.io,resources=diskconfigs/finalizers,verbs=update
 //+kubebuilder:rbac:groups="storage.k8s.io",resources=volumeattachments,verbs=create;list;watch
-//+kubebuilder:rbac:groups="storage.k8s.io",resources=storageclasses,verbs=get;update
+//+kubebuilder:rbac:groups="storage.k8s.io",resources=storageclasses,verbs=get;update;create
 //+kubebuilder:rbac:groups="storage.k8s.io",resources=storageclasses/finalizers,verbs=update
 //+kubebuilder:rbac:groups="batch",resources=jobs,verbs=create;list;watch;delete
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims/finalizers,verbs=update
-//+kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=list
-//+kubebuilder:rbac:groups="",resources=services,verbs=create;update;delete
-//+kubebuilder:rbac:groups="",resources=services/finalizers,verbs=update
-//+kubebuilder:rbac:groups="",resources=endpoints,verbs=list;watch
-//+kubebuilder:rbac:groups="",resources=pods,verbs=get;delete
+//+kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get
+//+kubebuilder:rbac:groups="",resources=pods,verbs=list;delete
 
 // indirect rbac
 //+kubebuilder:rbac:groups="",resources=namespaces;services;pods;persistentvolumes;replicationcontrollers,verbs=list;watch
+//+kubebuilder:rbac:groups="",resources=namespaces,verbs=get
 //+kubebuilder:rbac:groups="apps",resources=replicasets;statefulsets,verbs=list;watch
 //+kubebuilder:rbac:groups="policy",resources=poddisruptionbudgets,verbs=list;watch
 //+kubebuilder:rbac:groups="storage.k8s.io",resources=storageclasses;csinodes;csidrivers;csistoragecapacities,verbs=list;watch
@@ -111,14 +109,6 @@ func main() {
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
-		os.Exit(1)
-	}
-
-	if err = (&controllers.PodReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Pod")
 		os.Exit(1)
 	}
 

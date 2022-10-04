@@ -37,6 +37,66 @@ metadata:
     volume.beta.kubernetes.io/storage-provisioner: csi.storageos.com
     volume.kubernetes.io/storage-provisioner: csi.storageos.com
   finalizers:
+  - discoblocks.io/diskconfig-sample-storageos-once
+  - kubernetes.io/pvc-protection
+  labels:
+    discoblocks: diskconfig-sample-storageos-once
+  name: #PVC_HOSTPID_NAME#
+  namespace: pod-with-host-pid
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: storageos
+  volumeMode: Filesystem
+status:
+  accessModes:
+  - ReadWriteOnce
+  capacity:
+    storage: 1Gi
+  phase: Bound
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  annotations:
+    pv.kubernetes.io/bind-completed: "yes"
+    pv.kubernetes.io/bound-by-controller: "yes"
+    volume.beta.kubernetes.io/storage-provisioner: csi.storageos.com
+    volume.kubernetes.io/storage-provisioner: csi.storageos.com
+  finalizers:
+  - discoblocks.io/diskconfig-sample-storageos-daemon
+  - kubernetes.io/pvc-protection
+  labels:
+    discoblocks: diskconfig-sample-storageos-daemon
+  name: #PVC_DAEMON_NAME#
+  namespace: kube-system
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: storageos
+  volumeMode: Filesystem
+status:
+  accessModes:
+  - ReadWriteOnce
+  capacity:
+    storage: 1Gi
+  phase: Bound
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  annotations:
+    pv.kubernetes.io/bind-completed: "yes"
+    pv.kubernetes.io/bound-by-controller: "yes"
+    volume.beta.kubernetes.io/storage-provisioner: csi.storageos.com
+    volume.kubernetes.io/storage-provisioner: csi.storageos.com
+  finalizers:
   - discoblocks.io/diskconfig-sample-storageos-same
   - kubernetes.io/pvc-protection
   labels:
@@ -77,33 +137,21 @@ status:
   phase: Bound
 ---
 apiVersion: v1
-kind: PersistentVolumeClaim
+kind: PersistentVolume
 metadata:
-  annotations:
-    pv.kubernetes.io/bind-completed: "yes"
-    pv.kubernetes.io/bound-by-controller: "yes"
-    volume.beta.kubernetes.io/storage-provisioner: csi.storageos.com
-    volume.kubernetes.io/storage-provisioner: csi.storageos.com
   finalizers:
-  - discoblocks.io/diskconfig-sample-storageos-daemon
-  - kubernetes.io/pvc-protection
-  labels:
-    discoblocks: diskconfig-sample-storageos-daemon
-  name: #PVC_DAEMON_NAME#
-  namespace: kube-system
+  - kubernetes.io/pv-protection
+  - external-attacher/csi-storageos-com
+  name: #PV_HOSTPID_NAME#
 spec:
-  accessModes:
-  - ReadWriteOnce
-  resources:
-    requests:
-      storage: 1Gi
-  storageClassName: storageos
-  volumeMode: Filesystem
-status:
   accessModes:
   - ReadWriteOnce
   capacity:
     storage: 1Gi
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: storageos
+  volumeMode: Filesystem
+status:
   phase: Bound
 ---
 apiVersion: v1
@@ -165,26 +213,12 @@ kind: Pod
 metadata:
   labels:
     app: nginx
-    discoblocks/2498526953: diskconfig-sample-storageos-once
-    discoblocks/619933494: diskconfig-sample-storageos-same
-    discoblocks-metrics: #POD_NAME#
   name: #POD_NAME#
   namespace: default
 spec:
   containers:
   - image: nginx:1.23
-  - image: bitnami/node-exporter:1.3.1
+  - image: nixery.dev/shell/ucspi-tcp/mount
 status:
   phase: Running
----
-apiVersion: v1
-kind: Service
-metadata:
-  labels:
-    discoblocks/2498526953: diskconfig-sample-storageos-once
-    discoblocks/619933494: diskconfig-sample-storageos-same
-  name: #SERVICE_NAME#
-  namespace: default
-spec:
-  selector:
-    discoblocks-metrics: #POD_NAME#
+
