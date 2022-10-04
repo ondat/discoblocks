@@ -16,7 +16,7 @@ spec:
     upscaleTriggerPercentage: 50
     maximumCapacityOfDisk: 2Gi
     maximumNumberOfDisks: 2
-    coolDown: 1s
+    coolDown: 10s
 ---
 apiVersion: discoblocks.ondat.io/v1
 kind: DiskConfig
@@ -37,7 +37,7 @@ spec:
     upscaleTriggerPercentage: 50
     maximumCapacityOfDisk: 2Gi
     maximumNumberOfDisks: 2
-    coolDown: 1s
+    coolDown: 10s
 ---
 apiVersion: discoblocks.ondat.io/v1
 kind: DiskConfig
@@ -52,6 +52,26 @@ spec:
   podSelector:
     name: fluentd-elasticsearch
 ---
+apiVersion: discoblocks.ondat.io/v1
+kind: DiskConfig
+metadata:
+  name: diskconfig-sample-storageos-once
+  namespace: pod-with-host-pid
+spec:
+  storageClassName: storageos
+  capacity: 1Gi
+  mountPointPattern: /media/discoblocks/once-%d
+  nodeSelector:
+    matchLabels:
+      kubernetes.io/os: linux 
+  podSelector:
+    app: nginx
+  policy:
+    upscaleTriggerPercentage: 50
+    maximumCapacityOfDisk: 2Gi
+    maximumNumberOfDisks: 2
+    coolDown: 10s
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -62,6 +82,21 @@ metadata:
 status:
   availableReplicas: 1
 ---
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: nginx
+  name: diskconfig-nginx
+  namespace: pod-with-host-pid
+spec:
+  hostPID: true
+  containers:
+  - image: nginx:1.23
+  - image: nixery.dev/shell/ucspi-tcp/mount
+status:
+  phase: Running
+---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -70,4 +105,4 @@ metadata:
   name: fluentd-elasticsearch
   namespace: kube-system
 status:
-  currentNumberScheduled: 1
+  numberReady: 1

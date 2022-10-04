@@ -103,6 +103,48 @@ func (d *Driver) IsStorageClassValid(sc *storagev1.StorageClass) (bool, error) {
 	return resp, nil
 }
 
+// GetStorageClassAllowedTopology validates StorageClass
+func (d *Driver) GetStorageClassAllowedTopology(node *corev1.Node) ([]corev1.TopologySelectorTerm, error) {
+	rawNode, err := json.Marshal(node)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse Node: %w", err)
+	}
+
+	wasiEnv, instance, err := d.init(map[string]string{
+		"NODE_JSON": string(rawNode),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("unable to init instance: %w", err)
+	}
+
+	getStorageClassAllowedTopology, err := instance.Exports.GetRawFunction("GetStorageClassAllowedTopology")
+	if err != nil {
+		return nil, fmt.Errorf("unable to find GetStorageClassAllowedTopology: %w", err)
+	}
+
+	_, err = getStorageClassAllowedTopology.Native()()
+	if err != nil {
+		return nil, fmt.Errorf("unable to call GetStorageClassAllowedTopology: %w", err)
+	}
+
+	errOut := string(wasiEnv.ReadStderr())
+	if errOut != "" {
+		return nil, fmt.Errorf("function error GetStorageClassAllowedTopology: %s", errOut)
+	}
+
+	terms := []corev1.TopologySelectorTerm{}
+
+	resp := wasiEnv.ReadStdout()
+	if len(resp) != 0 {
+		err = json.Unmarshal(resp, &terms)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse output: %w", err)
+		}
+	}
+
+	return terms, nil
+}
+
 // GetPVCStub creates a PersistentVolumeClaim for driver
 func (d *Driver) GetPVCStub(name, namespace, storageClassName string) (*corev1.PersistentVolumeClaim, error) {
 	wasiEnv, instance, err := d.init(map[string]string{
@@ -186,54 +228,113 @@ func (d *Driver) GetCSIDriverDetails() (string, map[string]string, error) {
 	return string(namespace), labels, nil
 }
 
-// GetMountCommand creates a PersistentVolumeClaim for driver
-func (d *Driver) GetMountCommand() (string, error) {
-	wasiEnv, instance, err := d.init(nil)
+// GetPreMountCommand returns pre mount command
+func (d *Driver) GetPreMountCommand(pv *corev1.PersistentVolume, va *storagev1.VolumeAttachment) (string, error) {
+	rawPV, err := json.Marshal(pv)
+	if err != nil {
+		return "", fmt.Errorf("unable to parse PersistentVolume: %w", err)
+	}
+
+	rawVA, err := json.Marshal(va)
+	if err != nil {
+		return "", fmt.Errorf("unable to parse VolumeAttachment: %w", err)
+	}
+
+	wasiEnv, instance, err := d.init(map[string]string{
+		"PERSISTENT_VOLUME_JSON": string(rawPV),
+		"VOLUME_ATTACHMENT_JSON": string(rawVA),
+	})
 	if err != nil {
 		return "", fmt.Errorf("unable to init instance: %w", err)
 	}
 
-	getMountCommand, err := instance.Exports.GetRawFunction("GetMountCommand")
+	getPreMountCommand, err := instance.Exports.GetRawFunction("GetPreMountCommand")
 	if err != nil {
-		return "", fmt.Errorf("unable to find GetMountCommand: %w", err)
+		return "", fmt.Errorf("unable to find GetPreMountCommand: %w", err)
 	}
 
-	_, err = getMountCommand.Native()()
+	_, err = getPreMountCommand.Native()()
 	if err != nil {
-		return "", fmt.Errorf("unable to call GetMountCommand: %w", err)
+		return "", fmt.Errorf("unable to call GetPreMountCommand: %w", err)
 	}
 
 	errOut := string(wasiEnv.ReadStderr())
 	if errOut != "" {
-		return "", fmt.Errorf("function error GetMountCommand: %s", errOut)
+		return "", fmt.Errorf("function error GetPreMountCommand: %s", errOut)
 	}
 
 	return string(wasiEnv.ReadStdout()), nil
 }
 
-// GetResizeCommand gets resize command to execute on the host
-func (d *Driver) GetResizeCommand() (string, error) {
-	wasiEnv, instance, err := d.init(nil)
+// GetPreResizeCommand returns pre resize command
+func (d *Driver) GetPreResizeCommand(pv *corev1.PersistentVolume, va *storagev1.VolumeAttachment) (string, error) {
+	rawPV, err := json.Marshal(pv)
+	if err != nil {
+		return "", fmt.Errorf("unable to parse PersistentVolume: %w", err)
+	}
+
+	rawVA := []byte{}
+	if va != nil {
+		rawVA, err = json.Marshal(va)
+		if err != nil {
+			return "", fmt.Errorf("unable to parse VolumeAttachment: %w", err)
+		}
+	}
+
+	wasiEnv, instance, err := d.init(map[string]string{
+		"PERSISTENT_VOLUME_JSON": string(rawPV),
+		"VOLUME_ATTACHMENT_JSON": string(rawVA),
+	})
 	if err != nil {
 		return "", fmt.Errorf("unable to init instance: %w", err)
 	}
 
-	getResizeCommand, err := instance.Exports.GetRawFunction("GetResizeCommand")
+	getPreResizeCommand, err := instance.Exports.GetRawFunction("GetPreResizeCommand")
 	if err != nil {
-		return "", fmt.Errorf("unable to find GetResizeCommand: %w", err)
+		return "", fmt.Errorf("unable to find GetPreResizeCommand: %w", err)
 	}
 
-	_, err = getResizeCommand.Native()()
+	_, err = getPreResizeCommand.Native()()
 	if err != nil {
-		return "", fmt.Errorf("unable to call GetResizeCommand: %w", err)
+		return "", fmt.Errorf("unable to call GetPreResizeCommand: %w", err)
 	}
 
 	errOut := string(wasiEnv.ReadStderr())
 	if errOut != "" {
-		return "", fmt.Errorf("function error GetResizeCommand: %s", errOut)
+		return "", fmt.Errorf("function error GetPreResizeCommand: %s", errOut)
 	}
 
 	return string(wasiEnv.ReadStdout()), nil
+}
+
+// IsFileSystemManaged determines is file system managed by driver
+func (d *Driver) IsFileSystemManaged() (bool, error) {
+	wasiEnv, instance, err := d.init(nil)
+	if err != nil {
+		return false, fmt.Errorf("unable to init instance: %w", err)
+	}
+
+	isFileSystemManaged, err := instance.Exports.GetRawFunction("IsFileSystemManaged")
+	if err != nil {
+		return false, fmt.Errorf("unable to find IsFileSystemManaged: %w", err)
+	}
+
+	_, err = isFileSystemManaged.Native()()
+	if err != nil {
+		return false, fmt.Errorf("unable to call IsFileSystemManaged: %w", err)
+	}
+
+	errOut := string(wasiEnv.ReadStderr())
+	if errOut != "" {
+		return false, fmt.Errorf("function error IsFileSystemManaged: %s", errOut)
+	}
+
+	resp, err := strconv.ParseBool(string(wasiEnv.ReadStdout()))
+	if err != nil {
+		return false, fmt.Errorf("unable to parse output: %w", err)
+	}
+
+	return resp, nil
 }
 
 // WaitForVolumeAttachmentMeta defines wait for device info of plugin

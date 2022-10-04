@@ -1,16 +1,17 @@
 package utils
 
 import (
+	"bufio"
+	"context"
 	"errors"
 	"fmt"
-	"math/big"
-	"regexp"
+	"io"
+	"strconv"
 	"strings"
 	"time"
 
 	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
-	dto "github.com/prometheus/client_model/go"
-	"github.com/prometheus/common/expfmt"
+	"github.com/reiver/go-telnet"
 )
 
 const maxName = 253
@@ -32,23 +33,6 @@ func RenderMountPoint(pattern, name string, index int) string {
 	}
 
 	return fmt.Sprintf(pattern, index)
-}
-
-// GetMountPointIndex calculates index by mount point
-func GetMountPointIndex(pattern, name, mountPoint string) int {
-	if mountPoint == RenderMountPoint(pattern, name, 0) {
-		return 0
-	}
-
-	const maxDisks = 500
-
-	for i := 1; i < maxDisks; i++ {
-		if mountPoint == RenderMountPoint(pattern, name, i) {
-			return i
-		}
-	}
-
-	return -1
 }
 
 // RenderFinalizer calculates finalizer name
@@ -94,8 +78,8 @@ func RenderResourceName(prefix bool, elems ...string) (string, error) {
 }
 
 // RenderUniqueLabel renders DiskConfig label
-func RenderUniqueLabel(name string) string {
-	hash, err := Hash(name)
+func RenderUniqueLabel(id string) string {
+	hash, err := Hash(id)
 	if err != nil {
 		panic("Unable to calculate hash, better to say good bye!")
 	}
@@ -129,48 +113,76 @@ func GetNamePrefix(am discoblocksondatiov1.AvailabilityMode, configUID, nodeName
 	}
 }
 
-// ParsePrometheusMetric parses Prometheus metrisc details
-func ParsePrometheusMetric(metric string) (map[string]*dto.MetricFamily, error) {
-	var parser expfmt.TextParser
-
-	okErr := expfmt.ParseError{Line: 1, Msg: "unexpected end of input stream"}
-
-	mf, err := parser.TextToMetricFamilies(strings.NewReader(metric))
-	if err == okErr && mf != nil {
-		err = nil
+// FetchDiskInfo calls 'df' on the remote address
+func FetchDiskInfo(addr string) (map[string]float64, error) {
+	content, err := Telnet(addr)
+	if err != nil {
+		return nil, fmt.Errorf("unable to call endpoint %s: %w", addr, err)
 	}
 
-	return mf, err
-}
-
-// ParsePrometheusMetricValue parses Prometheus metrisc value
-func ParsePrometheusMetricValue(metric string) (float64, error) {
-	parts := strings.Split(metric, " ")
-
-	const floatBase = 10
-
-	flt, _, err := big.ParseFloat(parts[len(parts)-1], floatBase, 0, big.ToNearestEven)
-	f, _ := flt.Float64()
-
-	return f, err
-}
-
-// CompareStringNaturalOrder compares string in natural order
-func CompareStringNaturalOrder(a, b string) bool {
-	numberRegex := regexp.MustCompile(`\d+`)
-
-	convert := func(i string) string {
-		numbers := map[string]bool{}
-		for _, n := range numberRegex.FindAll([]byte(i), -1) {
-			numbers[string(n)] = true
-		}
-
-		for n := range numbers {
-			i = strings.ReplaceAll(i, n, fmt.Sprintf("%09s", n))
-		}
-
-		return i
+	if len(content) <= 1 {
+		return nil, nil
 	}
 
-	return convert(a) < convert(b)
+	content = content[1:]
+
+	diskInfo := map[string]float64{}
+	for _, line := range content {
+		parts := strings.Fields(line)
+
+		const six = 6
+		if len(parts) != six {
+			return nil, fmt.Errorf("unable to find valid disk info: %s", line)
+		}
+
+		const tt = 32
+		used, err := strconv.ParseFloat(parts[4][:len(parts[4])-1], tt)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse float by %s: %w", parts[4][:len(parts[4])-1], err)
+		}
+
+		diskInfo[parts[5]] = used
+	}
+
+	return diskInfo, nil
+}
+
+// Telnet calls endpoint and reads response
+func Telnet(addr string) (lines []string, err error) {
+	lines = []string{}
+
+	var conn *telnet.Conn
+	conn, err = telnet.DialTo(addr)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	const five = 5
+	timeout, cancel := context.WithTimeout(context.Background(), time.Second*five)
+	defer cancel()
+
+	reader := bufio.NewReader(conn)
+	for {
+		select {
+		case <-timeout.Done():
+			err = timeout.Err()
+			return
+		default:
+			var line string
+			line, err = reader.ReadString('\n')
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					err = nil
+					return
+				}
+
+				return
+			}
+
+			if line != "" {
+				lines = append(lines, line[:len(line)-1])
+			}
+		}
+	}
 }

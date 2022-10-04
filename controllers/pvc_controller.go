@@ -20,9 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -48,6 +47,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
+
+const monitoringPeriod = time.Minute / 2
 
 type nodeCache interface {
 	GetNodesByIP() map[string]string
@@ -146,308 +147,239 @@ func (r *PVCReconciler) MonitorVolumes() {
 	logger.Info("Monitor Volumes...")
 	defer logger.Info("Monitor done")
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute-time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), monitoringPeriod)
 	defer cancel()
 
-	label, err := labels.NewRequirement("discoblocks", selection.Exists, nil)
-	if err != nil {
-		logger.Error(err, "Unable to parse Service label selector")
-		return
-	}
-	endpointSelector := labels.NewSelector().Add(*label)
+	logger.Info("Fetch DiskConfigs...")
 
-	logger.Info("Fetch Endpoints...")
-
-	endpoints := corev1.EndpointsList{}
-	if err := r.Client.List(ctx, &endpoints, &client.ListOptions{
-		LabelSelector: endpointSelector,
-	}); err != nil {
-		logger.Error(err, "Unable to fetch Services")
+	diskConfigs := discoblocksondatiov1.DiskConfigList{}
+	if err := r.Client.List(ctx, &diskConfigs); err != nil {
+		logger.Error(err, "Unable to fetch DiskConfigs")
 		return
 	}
 
-	discoblocks := map[types.NamespacedName][]string{}
-	metrics := map[types.NamespacedName][]string{}
-	for i := range endpoints.Items {
-		if endpoints.Items[i].DeletionTimestamp != nil {
+	for d := range diskConfigs.Items {
+		config := diskConfigs.Items[d]
+
+		if config.Spec.Policy.Pause {
+			logger.Info("Autoscaling paused")
 			continue
 		}
 
-		for _, ss := range endpoints.Items[i].Subsets {
-			for _, ip := range ss.Addresses {
-				podName := types.NamespacedName{Namespace: ip.TargetRef.Namespace, Name: ip.TargetRef.Name}
-
-				if _, ok := discoblocks[podName]; !ok {
-					discoblocks[podName] = []string{}
-				}
-				for k, v := range endpoints.Items[i].Labels {
-					if strings.HasPrefix(k, "discoblocks/") {
-						discoblocks[podName] = append(discoblocks[podName], v)
-					}
-				}
-
-				logger := logger.WithValues("pod_name", podName.String(), "ep_name", endpoints.Items[i].Name, "IP", ip.IP)
-
-				req, err := http.NewRequest("GET", fmt.Sprintf("http://%s:9100/metrics", ip.IP), http.NoBody)
-				if err != nil {
-					logger.Error(err, "Request error")
-					continue
-				}
-
-				const div = 4
-				callCtx, cancel := context.WithTimeout(ctx, time.Minute/div)
-
-				logger.Info("Call Endpoint...")
-
-				resp, err := http.DefaultClient.Do(req.WithContext(callCtx))
-				if err != nil {
-					cancel()
-					logger.Error(err, "Connection error")
-					continue
-				}
-				cancel()
-
-				rawBody, err := io.ReadAll(resp.Body)
-				if err != nil {
-					logger.Error(err, "Body read error")
-					continue
-				}
-				if err = resp.Body.Close(); err != nil {
-					logger.Error(err, "Body close error")
-					continue
-				}
-
-				for _, line := range strings.Split(string(rawBody), "\n") {
-					if !strings.HasPrefix(line, "node_filesystem_avail_bytes") {
-						continue
-					}
-
-					mf, err := utils.ParsePrometheusMetric(line)
-					if err != nil {
-						logger.Error(err, "Failed to parse metrics")
-						continue
-					}
-
-					if _, ok := mf["node_filesystem_avail_bytes"]; !ok {
-						logger.Error(err, "Failed to find node_filesystem_avail_bytes", "metric", line)
-						continue
-					}
-
-					logger.Info("Metric found", "content", line)
-
-					if _, ok := metrics[podName]; !ok {
-						metrics[podName] = []string{}
-					}
-					metrics[podName] = append(metrics[podName], line)
-				}
-			}
-		}
-	}
-
-	if len(metrics) == 0 {
-		logger.Info("Metrics data not found")
-		return
-	}
-
-	diskConfigCache := map[types.NamespacedName]discoblocksondatiov1.DiskConfig{}
-
-	for podName, diskConfigNames := range discoblocks {
-		logger := logger.WithValues("pod_name", podName.String())
-
-		logger.Info("Fetch Pod...")
-
-		pod := corev1.Pod{}
-		if err := r.Client.Get(ctx, podName, &pod); err != nil {
-			logger.Error(err, "Failed to fetch pod error")
+		last, loaded := r.InProgress.Load(config.Name)
+		if loaded && last.(time.Time).Add(config.Spec.Policy.CoolDown.Duration).After(time.Now()) {
+			logger.Info("Autoscaling cooldown")
 			continue
 		}
 
-		for _, diskConfigName := range diskConfigNames {
-			diskConfigName := types.NamespacedName{Namespace: pod.Namespace, Name: diskConfigName}
+		logger := logger.WithValues("dc_name", config.Name, "dc_namespace", config.Namespace)
 
-			logger := logger.WithValues("dc_name", diskConfigName.String())
+		configLabel, err := labels.NewRequirement("discoblocks", selection.Equals, []string{config.Name})
+		if err != nil {
+			logger.Error(err, "Unable to parse PVC label selector")
+			continue
+		}
+		pvcSelector := labels.NewSelector().Add(*configLabel)
 
-			config, ok := diskConfigCache[diskConfigName]
-			if !ok {
-				logger.Info("Fetch DiskConfig...")
+		logger.Info("Fetch PVCs...")
 
-				config = discoblocksondatiov1.DiskConfig{}
-				if err := r.Client.Get(ctx, diskConfigName, &config); err != nil {
-					logger.Error(err, "Failed to fetch DiskConfig error")
-					continue
-				}
-				diskConfigCache[diskConfigName] = config
-			}
+		pvcs := corev1.PersistentVolumeClaimList{}
+		if err = r.Client.List(ctx, &pvcs, &client.ListOptions{
+			Namespace:     config.Namespace,
+			LabelSelector: pvcSelector,
+		}); err != nil {
+			logger.Error(err, "Unable to fetch PVCs")
+			continue
+		}
 
-			if config.Spec.Policy.Pause {
-				logger.Info("Autoscaling paused")
+		activePVCs := []*corev1.PersistentVolumeClaim{}
+		for i := range pvcs.Items {
+			if pvcs.Items[i].DeletionTimestamp != nil ||
+				!controllerutil.ContainsFinalizer(&pvcs.Items[i], utils.RenderFinalizer(config.Name)) ||
+				pvcs.Items[i].Status.ResizeStatus != nil && *pvcs.Items[i].Status.ResizeStatus != corev1.PersistentVolumeClaimNoExpansionInProgress {
 				continue
 			}
 
-			last, loaded := r.InProgress.Load(config.Name)
-			if loaded && last.(time.Time).Add(config.Spec.Policy.CoolDown.Duration).After(time.Now()) {
-				logger.Info("Autoscaling cooldown")
+			activePVCs = append(activePVCs, &pvcs.Items[i])
+
+			logger.Info("Volume found", "pvc_name", pvcs.Items[i].Name)
+		}
+
+		if len(activePVCs) == 0 {
+			logger.Info("Unable to find any PVC")
+			continue
+		}
+
+		podLabel, err := labels.NewRequirement(utils.RenderUniqueLabel(string(config.UID)), selection.Equals, []string{config.Name})
+		if err != nil {
+			logger.Error(err, "Unable to parse Pod label selector")
+			continue
+		}
+		podSelector := labels.NewSelector().Add(*podLabel)
+
+		logger.Info("Fetch Pods...")
+
+		pods := corev1.PodList{}
+		if err = r.Client.List(ctx, &pods, &client.ListOptions{
+			Namespace:     config.Namespace,
+			LabelSelector: podSelector,
+		}); err != nil {
+			logger.Error(err, "Unable to fetch Pods")
+			continue
+		}
+
+		sem := utils.CreateSemaphore(concurrency, config.Spec.Policy.CoolDown.Duration)
+		wg := sync.WaitGroup{}
+
+		for p := range pods.Items {
+			pod := pods.Items[p]
+
+			if pod.DeletionTimestamp != nil {
 				continue
 			}
 
-			label, err := labels.NewRequirement("discoblocks", selection.Equals, []string{config.Name})
-			if err != nil {
-				logger.Error(err, "Unable to parse PVC label selector")
-				continue
-			}
-			pvcSelector := labels.NewSelector().Add(*label)
+			wg.Add(1)
 
-			logger.Info("Fetch PVCs...")
+			go func() {
+				defer wg.Done()
 
-			pvcs := corev1.PersistentVolumeClaimList{}
-			if err = r.Client.List(ctx, &pvcs, &client.ListOptions{
-				Namespace:     config.Namespace,
-				LabelSelector: pvcSelector,
-			}); err != nil {
-				logger.Error(err, "Unable to fetch PVCs")
-				continue
-			}
-
-			livePVCs := []*corev1.PersistentVolumeClaim{}
-			for i := range pvcs.Items {
-				if pvcs.Items[i].DeletionTimestamp != nil ||
-					!controllerutil.ContainsFinalizer(&pvcs.Items[i], utils.RenderFinalizer(config.Name)) ||
-					pvcs.Items[i].Status.ResizeStatus != nil && *pvcs.Items[i].Status.ResizeStatus != corev1.PersistentVolumeClaimNoExpansionInProgress {
-					continue
-				}
-
-				livePVCs = append(livePVCs, &pvcs.Items[i])
-
-				logger.Info("Volume found", "pvc_name", pvcs.Items[i].Name)
-			}
-
-			if len(livePVCs) == 0 {
-				logger.Error(err, "Unable to find any PVC")
-				continue
-			}
-
-			sort.Slice(livePVCs, func(i, j int) bool {
-				return livePVCs[i].CreationTimestamp.UnixNano() < livePVCs[j].CreationTimestamp.UnixNano()
-			})
-
-			const hundred = 100
-
-			lastPVC := livePVCs[len(livePVCs)-1]
-			actualCapacity := lastPVC.Spec.Resources.Requests[corev1.ResourceStorage]
-			treshold := actualCapacity.AsApproximateFloat64() * float64(config.Spec.Policy.UpscaleTriggerPercentage) / hundred
-
-			lastDiskDetails := struct {
-				metrics    string
-				mountpoint string
-			}{
-				metrics:    "",
-				mountpoint: "",
-			}
-			for _, metric := range metrics[podName] {
-				mf, err := utils.ParsePrometheusMetric(metric)
+				unlock, err := utils.WaitForSemaphore(ctx, sem)
 				if err != nil {
-					logger.Error(err, "Failed to parse metrics")
-					continue
+					logger.Info("Context deadline")
+					return
+				}
+				defer unlock()
+
+				logger := logger.WithValues("pod_name", pod.Name)
+
+				logger.Info("Fetch DiskInfo...")
+
+				diskInfo, err := utils.FetchDiskInfo(fmt.Sprintf("%s:9100", pod.Status.PodIP))
+				if err != nil {
+					logger.Error(err, "Unable to fetch disk info")
+					return
 				}
 
-				for _, m := range mf["node_filesystem_avail_bytes"].Metric {
-					for _, l := range m.Label {
-						if l.Name == nil || l.Value == nil || *l.Name != "mountpoint" ||
-							utils.GetMountPointIndex(config.Spec.MountPointPattern, config.Name, *l.Value) < 0 ||
-							utils.CompareStringNaturalOrder(*l.Value, lastDiskDetails.mountpoint) {
+				podPVCsByParent := map[string][]*corev1.PersistentVolumeClaim{}
+				for i := range pod.Spec.Volumes {
+					if pod.Spec.Volumes[i].PersistentVolumeClaim == nil {
+						continue
+					}
+
+					for cp := range activePVCs {
+						if _, ok := activePVCs[cp].Labels["discoblocks-parent"]; !ok &&
+							pod.Spec.Volumes[i].PersistentVolumeClaim.ClaimName == activePVCs[cp].Name {
+							if _, ok := podPVCsByParent[activePVCs[cp].Name]; !ok {
+								podPVCsByParent[activePVCs[cp].Name] = []*corev1.PersistentVolumeClaim{}
+							}
+							podPVCsByParent[activePVCs[cp].Name] = append(podPVCsByParent[activePVCs[cp].Name], activePVCs[cp])
+
+							for cc := range activePVCs {
+								if parent, ok := activePVCs[cc].Labels["discoblocks-parent"]; ok && parent == activePVCs[cp].Name {
+									podPVCsByParent[activePVCs[cp].Name] = append(podPVCsByParent[activePVCs[cp].Name], activePVCs[cc])
+								}
+							}
+						}
+					}
+				}
+
+				if len(podPVCsByParent) == 0 {
+					logger.Error(err, "Unable to find any PVC for Pod")
+					return
+				}
+
+				for _, pvcFamily := range podPVCsByParent {
+					sort.Slice(pvcFamily, func(i, j int) bool {
+						return pvcFamily[i].CreationTimestamp.UnixNano() < pvcFamily[j].CreationTimestamp.UnixNano()
+					})
+
+					lastPVC := pvcFamily[len(pvcFamily)-1]
+
+					actIndex := 0
+					if lastIndex, ok := lastPVC.Labels["discoblocks-index"]; ok {
+						actIndex, err = strconv.Atoi(lastIndex)
+						if err != nil {
+							logger.Error(err, "Unable to convert index")
+							continue
+						}
+					}
+
+					lastMountPoint := utils.RenderMountPoint(config.Spec.MountPointPattern, config.Name, actIndex)
+
+					logger = logger.WithValues("last_pvc", lastPVC.Name, "last_pv", lastPVC.Spec.VolumeName, "last_mp", lastMountPoint)
+
+					lastUsed, ok := diskInfo[lastMountPoint]
+					if !ok {
+						logger.Error(err, "Unable to find metrics", "disk_info", diskInfo)
+						continue
+					}
+
+					logger = logger.WithValues("last_used_%", lastUsed)
+
+					if lastUsed < float64(config.Spec.Policy.UpscaleTriggerPercentage) {
+						logger.Info("Disk size ok")
+						continue
+					}
+
+					newCapacity := config.Spec.Policy.ExtendCapacity
+					newCapacity.Add(lastPVC.Spec.Resources.Requests[corev1.ResourceStorage])
+
+					logger = logger.WithValues("new_capacity", newCapacity.String(), "max_capacity", config.Spec.Policy.MaximumCapacityOfDisk.String(), "no_disks", len(pvcFamily), "max_disks", config.Spec.Policy.MaximumNumberOfDisks)
+
+					logger.Info("Find Node name")
+
+					nodeName := r.NodeCache.GetNodesByIP()[pod.Status.HostIP]
+					if nodeName == "" {
+						logger.Error(errors.New("node not found: "+pod.Status.HostIP), "Node not found", "IP", pod.Status.HostIP)
+						continue
+					}
+
+					logger = logger.WithValues("node_name", nodeName)
+
+					if newCapacity.Cmp(config.Spec.Policy.MaximumCapacityOfDisk) == 1 {
+						if config.Spec.Policy.MaximumNumberOfDisks > 0 && len(pvcFamily) >= int(config.Spec.Policy.MaximumNumberOfDisks) {
+							logger.Info("Already maximum number of disks", "number", config.Spec.Policy.MaximumNumberOfDisks)
 							continue
 						}
 
-						lastDiskDetails = struct {
-							metrics    string
-							mountpoint string
-						}{
-							metrics:    metric,
-							mountpoint: *l.Value,
+						logger.Info("New disk needed")
+
+						nextIndex := actIndex + 1
+
+						logger.Info("Next index", "index", nextIndex)
+
+						containerIDs := []string{}
+						for i := range pod.Status.ContainerStatuses {
+							cID := pod.Status.ContainerStatuses[i].ContainerID
+							for _, prefix := range []string{"containerd://", "docker://"} {
+								cID = strings.TrimPrefix(cID, prefix)
+							}
+
+							containerIDs = append(containerIDs, cID)
 						}
-					}
-				}
-			}
 
-			if lastDiskDetails.metrics == "" {
-				logger.Error(err, "Unable to find metrics")
-				continue
-			}
+						r.InProgress.Store(config.Name, time.Now())
 
-			logger.Info("Last PVC metric", "metric", lastDiskDetails.metrics)
+						go r.createPVC(&config, &pod, pvcFamily[0], containerIDs, nodeName, nextIndex, logger)
 
-			logger = logger.WithValues("last_mountpoint", lastDiskDetails.mountpoint)
-
-			available, err := utils.ParsePrometheusMetricValue(lastDiskDetails.metrics)
-			if err != nil {
-				logger.Error(err, "Metric is invalid")
-				continue
-			}
-
-			logger.Info("Capacities", "actual", fmt.Sprintf("%.2f", actualCapacity.AsApproximateFloat64()), "available", fmt.Sprintf("%.2f", available), "treshold", fmt.Sprintf("%.2f", treshold))
-
-			if available > treshold {
-				logger.Info("Disk size ok")
-				continue
-			}
-
-			newCapacity := config.Spec.Policy.ExtendCapacity
-			newCapacity.Add(actualCapacity)
-
-			logger = logger.WithValues("new_capacity", newCapacity.String(), "max_capacity", config.Spec.Policy.MaximumCapacityOfDisk.String(), "no_disks", len(livePVCs), "max_disks", config.Spec.Policy.MaximumNumberOfDisks)
-
-			logger.Info("Find Node name")
-
-			nodeName := r.NodeCache.GetNodesByIP()[pod.Status.HostIP]
-			if nodeName == "" {
-				logger.Error(errors.New("node not found: "+pod.Status.HostIP), "Node not found", "IP", pod.Status.HostIP)
-				continue
-			}
-
-			logger = logger.WithValues("node_name", nodeName)
-
-			if newCapacity.Cmp(config.Spec.Policy.MaximumCapacityOfDisk) == 1 {
-				if config.Spec.Policy.MaximumNumberOfDisks > 0 && len(livePVCs) >= int(config.Spec.Policy.MaximumNumberOfDisks) {
-					logger.Info("Already maximum number of disks", "number", config.Spec.Policy.MaximumNumberOfDisks)
-					continue
-				}
-
-				logger.Info("New disk needed")
-
-				nextIndex := 1
-				if last := utils.GetMountPointIndex(config.Spec.MountPointPattern, config.Name, lastDiskDetails.mountpoint); last >= 0 {
-					nextIndex = last + 1
-				}
-
-				logger.Info("Next index", "index", nextIndex)
-
-				containerIDs := []string{}
-				for i := range pod.Status.ContainerStatuses {
-					cID := pod.Status.ContainerStatuses[i].ContainerID
-					for _, prefix := range []string{"containerd://", "docker://"} {
-						cID = strings.TrimPrefix(cID, prefix)
+						continue
 					}
 
-					containerIDs = append(containerIDs, cID)
+					logger.Info("Resize needed")
+
+					r.InProgress.Store(config.Name, time.Now())
+
+					go r.resizePVC(&config, newCapacity, lastPVC, nodeName, logger)
 				}
-
-				r.InProgress.Store(config.Name, time.Now())
-
-				go r.createPVC(&config, livePVCs[0], containerIDs, nodeName, nextIndex, logger)
-
-				continue
-			}
-
-			logger.Info("Resize needed")
-
-			r.InProgress.Store(config.Name, time.Now())
-
-			go r.resizePVC(&config, newCapacity, lastPVC, nodeName, logger)
+			}()
 		}
+
+		wg.Wait()
 	}
 }
 
-func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, parentPVC *corev1.PersistentVolumeClaim, containerIDs []string, nodeName string, nextIndex int, logger logr.Logger) {
+//nolint:gocyclo // It is complex we know
+func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, pod *corev1.Pod, parentPVC *corev1.PersistentVolumeClaim, containerIDs []string, nodeName string, nextIndex int, logger logr.Logger) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
@@ -464,6 +396,14 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, paren
 	}
 	logger = logger.WithValues("provisioner", sc.Provisioner)
 
+	logger.Info("Fetch Node...")
+
+	node := &corev1.Node{}
+	if err := r.Client.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
+		logger.Error(err, "Failed to get Node")
+		return
+	}
+
 	driver := drivers.GetDriver(sc.Provisioner)
 	if driver == nil {
 		logger.Error(errors.New("driver not found: "+sc.Provisioner), "Driver not found")
@@ -478,6 +418,37 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, paren
 		return
 	}
 	logger = logger.WithValues("pvc_name", pvc.Name)
+
+	scAllowedTopology, err := driver.GetStorageClassAllowedTopology(node)
+	if err != nil {
+		logger.Error(err, "Failed to call driver", "method", "GetStorageClassAllowedTopology")
+		return
+	}
+
+	waitForMeta, err := driver.WaitForVolumeAttachmentMeta()
+	if err != nil {
+		logger.Error(err, "Failed to call driver", "method", "WaitForVolumeAttachmentMeta")
+		return
+	}
+
+	if len(scAllowedTopology) != 0 {
+		topologySC, err := utils.NewStorageClass(&sc, scAllowedTopology)
+		if err != nil {
+			logger.Error(err, "Failed to render get NewStorageClass")
+			return
+		}
+
+		logger.Info("Create StorageClass...")
+
+		if err = r.Create(ctx, topologySC); err != nil {
+			if !apierrors.IsAlreadyExists(err) {
+				logger.Error(err, "Failed to create StorageClass")
+				return
+			}
+		}
+
+		pvc.Spec.StorageClassName = &topologySC.Name
+	}
 
 	pvc.Labels["discoblocks-parent"] = parentPVC.Name
 	pvc.Labels["discoblocks-index"] = fmt.Sprintf("%d", nextIndex)
@@ -498,21 +469,49 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, paren
 		return
 	}
 
-	waitCtx, cancel := context.WithTimeout(context.Background(), time.Hour)
+	waitCtx, cancel := context.WithTimeout(context.Background(), config.Spec.Policy.CoolDown.Duration)
 	defer cancel()
 
-	logger.Info("Wait PVC...")
+	logger.Info("Wait PersistentVolume...")
 
-WAIT_PVC:
+	var waitPVErr error
+WAIT_PV:
 	for {
 		select {
 		case <-waitCtx.Done():
-			logger.Error(waitCtx.Err(), "PVC creation wait timeout")
+			if waitPVErr == nil {
+				waitPVErr = waitCtx.Err()
+			}
+			logger.Error(waitPVErr, "PV creation wait timeout")
 			return
 		default:
-			if err = r.Get(ctx, types.NamespacedName{Namespace: pvc.Namespace, Name: pvc.Name}, pvc); err == nil &&
+			if waitPVErr = r.Get(ctx, types.NamespacedName{Namespace: pvc.Namespace, Name: pvc.Name}, pvc); waitPVErr == nil &&
 				pvc.Spec.VolumeName != "" {
-				break WAIT_PVC
+				break WAIT_PV
+			}
+
+			<-time.NewTimer(time.Second).C
+		}
+	}
+
+	logger.Info("Wait CSI provision...")
+
+	pv := &corev1.PersistentVolume{}
+
+	var waitCSIErr error
+WAIT_CSI:
+	for {
+		select {
+		case <-waitCtx.Done():
+			if waitCSIErr == nil {
+				waitCSIErr = waitCtx.Err()
+			}
+			logger.Error(waitCSIErr, "CSI provision wait timeout")
+			return
+		default:
+			if waitCSIErr = r.Client.Get(ctx, types.NamespacedName{Name: pvc.Spec.VolumeName}, pv); waitCSIErr == nil &&
+				pv.Spec.CSI != nil && pv.Spec.CSI.VolumeHandle != "" {
+				break WAIT_CSI
 			}
 
 			<-time.NewTimer(time.Second).C
@@ -525,26 +524,15 @@ WAIT_PVC:
 		return
 	}
 
-	logger.Info("Find PersistentVolume...")
-
-	pv, err := r.getPersistentVolume(ctx, pvc.Name)
-	if err != nil {
-		logger.Error(err, "Failed to find PersistentVolume")
-		return
-	} else if pv.Spec.CSI == nil {
-		logger.Error(err, "Failed to find pv.spec.csi")
-		return
-	}
-
 	volumeAttachment := &storagev1.VolumeAttachment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: vaName,
 			OwnerReferences: []metav1.OwnerReference{
 				{
-					APIVersion: pv.APIVersion,
-					Kind:       pv.Kind,
-					Name:       pv.Name,
-					UID:        pv.UID,
+					APIVersion: pod.APIVersion,
+					Kind:       pod.Kind,
+					Name:       pod.Name,
+					UID:        pod.UID,
 				},
 			},
 		},
@@ -564,47 +552,59 @@ WAIT_PVC:
 		return
 	}
 
-	waitForMeta, err := driver.WaitForVolumeAttachmentMeta()
-	if err != nil {
-		logger.Error(err, "Failed to call driver", "method", "WaitForVolumeAttachmentMeta")
-		return
+	volumeMeta := ""
+	if waitForMeta != "" {
+		logger.Info("Wait VolumeAttachment...", "waitForMeta", waitForMeta)
+
+		var waitVAErr error
+	WAIT_VA:
+		for {
+			select {
+			case <-waitCtx.Done():
+				if waitVAErr == nil {
+					waitVAErr = waitCtx.Err()
+				}
+				logger.Error(waitVAErr, "VolumeAttachment wait timeout")
+				return
+			default:
+				volumeAttachment, waitVAErr = r.getVolumeAttachment(ctx, pvc.Spec.VolumeName)
+				if err != nil ||
+					volumeAttachment == nil ||
+					!volumeAttachment.Status.Attached ||
+					volumeAttachment.Status.AttachmentMetadata[waitForMeta] == "" {
+					<-time.NewTimer(time.Second).C
+					continue
+				}
+
+				volumeMeta = volumeAttachment.Status.AttachmentMetadata[waitForMeta]
+
+				logger.Info("VolumeAttachment meta has found", "waitForMeta", waitForMeta, "value", volumeMeta)
+
+				break WAIT_VA
+			}
+		}
 	}
 
-	logger.Info("Wait VolumeAttachment...", "waitForMeta", waitForMeta)
-
-	var dev string
-WAIT_VA:
-	for {
-		select {
-		case <-waitCtx.Done():
-			logger.Error(waitCtx.Err(), "VolumeAttachment creation wait timeout")
-			return
-		default:
-			if err = r.Get(ctx, types.NamespacedName{Name: vaName}, volumeAttachment); err != nil ||
-				!volumeAttachment.Status.Attached ||
-				waitForMeta != "" && volumeAttachment.Status.AttachmentMetadata[waitForMeta] == "" {
-				<-time.NewTimer(time.Second).C
-
-				continue
-			}
-
-			dev = volumeAttachment.Status.AttachmentMetadata[waitForMeta]
-
-			break WAIT_VA
-		}
+	preMountCmd, err := driver.GetPreMountCommand(pv, volumeAttachment)
+	if err != nil {
+		logger.Error(err, "Failed to call GetPreMountCommand")
+		return
 	}
 
 	mountpoint := utils.RenderMountPoint(config.Spec.MountPointPattern, config.Name, nextIndex)
 
-	mountJob, err := utils.RenderHostJob(pvc.Name, pvc.Namespace, nodeName, dev, pv.Spec.CSI.FSType, mountpoint, containerIDs, driver.GetMountCommand)
+	mountJob, err := utils.RenderMountJob(pvc.Name, pvc.Spec.VolumeName, pvc.Namespace, nodeName, pv.Spec.CSI.FSType, mountpoint, containerIDs, preMountCmd, volumeMeta, metav1.OwnerReference{
+		APIVersion: parentPVC.APIVersion,
+		Kind:       parentPVC.Kind,
+		Name:       pvc.Name,
+		UID:        pvc.UID,
+	})
 	if err != nil {
 		logger.Error(err, "Unable to render mount job")
 		return
-	} else if mountJob == nil {
-		return
 	}
 
-	logger.Info("Create mount Job", "containers", containerIDs, "mountpoint", mountpoint)
+	logger.Info("Create mount Job...", "containers", containerIDs, "mountpoint", mountpoint)
 
 	if err := r.Create(ctx, mountJob); err != nil {
 		logger.Error(err, "Failed to create mount job")
@@ -626,7 +626,7 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 	}
 
 	if _, ok := pvc.Labels["discoblocks-parent"]; !ok {
-		logger.Info("Parent PVC is managed by CSI driver")
+		logger.Info("First PVC is managed by CSI driver")
 		return
 	}
 
@@ -647,10 +647,11 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 		return
 	}
 
-	if c, err := driver.GetResizeCommand(); err != nil {
-		logger.Error(err, "Failed to call GetResizeCommand")
+	if isFsManaged, err := driver.IsFileSystemManaged(); err != nil {
+		logger.Error(err, "Failed to call IsFileSystemManaged")
 		return
-	} else if c == "" {
+	} else if isFsManaged {
+		logger.Info("Filesystem will resized by CSI driver")
 		return
 	}
 
@@ -660,37 +661,10 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 		return
 	}
 
-	dev := ""
-	if waitForMeta != "" {
-		volumeAttachment := &storagev1.VolumeAttachment{}
-
-		vaName, err := utils.RenderResourceName(true, config.Name, pvc.Name, pvc.Namespace)
-		if err != nil {
-			logger.Error(err, "Failed to render VolumeAttachment name")
-			return
-		}
-
-		logger.Info("Fetch VolumeAttachment...")
-
-		if err = r.Get(ctx, types.NamespacedName{Name: vaName}, volumeAttachment); err != nil {
-			logger.Error(err, "Failed to fetch VolumeAttachment")
-			return
-		}
-
-		if m, ok := volumeAttachment.Status.AttachmentMetadata[waitForMeta]; !ok || m == "" {
-			logger.Error(errors.New("failed to find VolumeAttachment meta"), "Failed to find VolumeAttachment meta")
-			return
-		}
-
-		dev = volumeAttachment.Status.AttachmentMetadata[waitForMeta]
-	}
-
-	logger.Info("Determine file-system...")
-
 	logger.Info("Find PersistentVolume...")
 
-	pv, err := r.getPersistentVolume(ctx, pvc.Name)
-	if err != nil {
+	pv := &corev1.PersistentVolume{}
+	if err := r.Client.Get(ctx, types.NamespacedName{Name: pvc.Spec.VolumeName}, pv); err != nil {
 		logger.Error(err, "Failed to find PersistentVolume")
 		return
 	} else if pv.Spec.CSI == nil {
@@ -698,7 +672,37 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 		return
 	}
 
-	resizeJob, err := utils.RenderHostJob(pvc.Name, pvc.Namespace, nodeName, dev, pv.Spec.CSI.FSType, "", []string{}, driver.GetResizeCommand)
+	var volumeAttachment *storagev1.VolumeAttachment
+
+	volumeMeta := ""
+	if waitForMeta != "" {
+		logger.Info("Fetch VolumeAttachment...")
+
+		volumeAttachment, err = r.getVolumeAttachment(ctx, pvc.Spec.VolumeName)
+		if err != nil {
+			logger.Error(err, "Failed to fetch VolumeAttachment")
+			return
+		}
+
+		volumeMeta = volumeAttachment.Status.AttachmentMetadata[waitForMeta]
+		if volumeMeta == "" {
+			logger.Error(err, "Failed to find VolumeAttachment meta")
+			return
+		}
+	}
+
+	preResizeCmd, err := driver.GetPreResizeCommand(pv, volumeAttachment)
+	if err != nil {
+		logger.Error(err, "Failed to call GetPreResizeCommand")
+		return
+	}
+
+	resizeJob, err := utils.RenderResizeJob(pvc.Name, pvc.Spec.VolumeName, pvc.Namespace, nodeName, pv.Spec.CSI.FSType, preResizeCmd, volumeMeta, metav1.OwnerReference{
+		APIVersion: pvc.APIVersion,
+		Kind:       pvc.Kind,
+		Name:       pvc.Name,
+		UID:        pvc.UID,
+	})
 	if err != nil {
 		logger.Error(err, "Unable to render mount job")
 		return
@@ -706,7 +710,7 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 		return
 	}
 
-	logger.Info("Create resize Job")
+	logger.Info("Create resize Job...")
 
 	if err := r.Create(ctx, resizeJob); err != nil {
 		logger.Error(err, "Failed to create resize job")
@@ -714,22 +718,28 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 	}
 }
 
-func (r *PVCReconciler) getPersistentVolume(ctx context.Context, pvcName string) (*corev1.PersistentVolume, error) {
-	pvList := corev1.PersistentVolumeList{}
-	if err := r.List(ctx, &pvList, &client.ListOptions{
-		FieldSelector: fields.OneTermEqualSelector("spec.claimRef.name", pvcName),
+func (r *PVCReconciler) getVolumeAttachment(ctx context.Context, volumeName string) (*storagev1.VolumeAttachment, error) {
+	volumeAttachments := &storagev1.VolumeAttachmentList{}
+	if err := r.List(ctx, volumeAttachments, &client.ListOptions{
+		FieldSelector: client.MatchingFieldsSelector{
+			Selector: fields.OneTermEqualSelector("spec.source.persistentVolumeName", volumeName),
+		},
 	}); err != nil {
-		return nil, fmt.Errorf("failed to list PVs: %w", err)
+		return nil, err
 	}
 
 	switch {
-	case len(pvList.Items) == 0:
-		return nil, errors.New("failed to find PV")
-	case len(pvList.Items) > 1:
-		return nil, errors.New("more than one PV attached to PVC")
+	case len(volumeAttachments.Items) == 0:
+		return nil, errors.New("failed to find VolumeAttachment")
+	case len(volumeAttachments.Items) > 1:
+		return nil, errors.New("more than one VolumeAttachment attached to PersistentVolume")
 	}
 
-	return &pvList.Items[0], nil
+	sort.Slice(volumeAttachments.Items, func(i, j int) bool {
+		return volumeAttachments.Items[i].CreationTimestamp.UnixNano() < volumeAttachments.Items[j].CreationTimestamp.UnixNano()
+	})
+
+	return &volumeAttachments.Items[0], nil
 }
 
 type pvcEventFilter struct {
@@ -781,8 +791,7 @@ func (r *PVCReconciler) SetupWithManager(mgr ctrl.Manager) (chan<- bool, error) 
 	closeChan := make(chan bool)
 
 	go func() {
-		const two = 2
-		ticker := time.NewTicker(time.Minute / two)
+		ticker := time.NewTicker(monitoringPeriod)
 		defer ticker.Stop()
 
 		for {
@@ -798,17 +807,17 @@ func (r *PVCReconciler) SetupWithManager(mgr ctrl.Manager) (chan<- bool, error) 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	if err := mgr.GetFieldIndexer().IndexField(ctx, &corev1.PersistentVolume{}, "spec.claimRef.name", func(rawObj client.Object) []string {
-		pv, ok := rawObj.(*corev1.PersistentVolume)
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &storagev1.VolumeAttachment{}, "spec.source.persistentVolumeName", func(rawObj client.Object) []string {
+		va, ok := rawObj.(*storagev1.VolumeAttachment)
 		if !ok {
 			return nil
 		}
 
-		if pv.Spec.ClaimRef == nil {
+		if va.Spec.Source.PersistentVolumeName == nil {
 			return nil
 		}
 
-		return []string{pv.Spec.ClaimRef.Name}
+		return []string{*va.Spec.Source.PersistentVolumeName}
 	}); err != nil {
 		return nil, err
 	}

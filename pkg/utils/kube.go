@@ -11,6 +11,8 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 )
 
@@ -19,32 +21,19 @@ const hostCommandPrefix = "\n          "
 
 var hostCommandReplacePattern = regexp.MustCompile(`\n`)
 
-const metricsServiceTemplate = `kind: Service
-apiVersion: v1
-metadata:
-  name: "%s"
-  namespace: "%s"
-  annotations:
-    prometheus.io/path: "/metrics"
-    prometheus.io/scrape: "true"
-    prometheus.io/port:   "9100"
-spec:
-  ports:
-  - name: node-exporter
-    protocol: TCP
-    port: 9100
-    targetPort: 9100
-`
-
 const metricsTeamplate = `name: discoblocks-metrics
-image: bitnami/node-exporter:1.3.1
+image: nixery.dev/shell/ucspi-tcp/mount
 ports:
 - containerPort: 9100
   protocol: TCP
 command:
-- /opt/bitnami/node-exporter/bin/node_exporter
-- --collector.disable-defaults
-- --collector.filesystem
+- sh
+- -c
+- |
+  trap exit SIGTERM ;
+  while true; do tcpserver -v -c 1 -D -P -R -H -t 3 -l 0 0.0.0.0 9100 df -P & c=$! wait $c; done
+securityContext:
+  privileged: false
 `
 
 const hostJobTemplate = `apiVersion: batch/v1
@@ -61,7 +50,7 @@ spec:
       nodeName: "%s"
       containers:
       - name: mount
-        image: nixery.dev/shell/gawk/gnugrep/gnused/coreutils-full/cri-tools/docker-client
+        image: nixery.dev/shell/gawk/gnugrep/gnused/coreutils-full/cri-tools/docker-client/nvme-cli
         env:
         - name: MOUNT_POINT
           value: "%s"
@@ -69,9 +58,11 @@ spec:
           value: "%s"
         - name: PVC_NAME
           value: "%s"
-        - name: DEV
+        - name: PV_NAME
           value: "%s"
         - name: FS
+          value: "%s"
+        - name: VOLUME_ATTACHMENT_META
           value: "%s"
         command:
         - bash
@@ -100,18 +91,37 @@ spec:
        - hostPath:
           path: /
          name: host
-  backoffLimit: 10
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
 `
 
-// RenderMetricsService returns the metrics service
-func RenderMetricsService(name, namespace string) (*corev1.Service, error) {
-	service := corev1.Service{}
-	if err := yaml.Unmarshal([]byte(fmt.Sprintf(metricsServiceTemplate, name, namespace)), &service); err != nil {
-		return nil, fmt.Errorf("unable to unmarshal service: %w", err)
-	}
+const (
+	mountCommandTemplate = `%s
+DEV_MAJOR=$(chroot /host nsenter --target 1 --mount lsblk -lp | grep ${DEV} | awk '{print $2}'  | awk '{split($0,a,":"); print a[1]}') &&
+DEV_MINOR=$(chroot /host nsenter --target 1 --mount lsblk -lp | grep ${DEV} | awk '{print $2}'  | awk '{split($0,a,":"); print a[2]}') &&
+for CONTAINER_ID in ${CONTAINER_IDS}; do
+	chroot /host nsenter --target ${PID} --mount mount | grep "${DEV} on ${MOUNT_POINT}" || (
+		PID=$(docker inspect -f '{{.State.Pid}}' ${CONTAINER_ID} || crictl inspect --output go-template --template '{{.info.pid}}' ${CONTAINER_ID}) &&
+		(
+			chroot /host nsenter --target ${PID} --mount mkdir -p $(dirname ${DEV}) ${MOUNT_POINT} &&
+			chroot /host nsenter --target ${PID} --pid --mount mknod ${DEV} b ${DEV_MAJOR} ${DEV_MINOR} &&
+			chroot /host nsenter --target ${PID} --mount mount ${DEV} ${MOUNT_POINT}
+		)
+	)
+done`
+)
 
-	return &service, nil
-}
+const resizeCommandTemplate = `%s
+chroot /host nsenter --target 1 --mount mkdir -p /tmp/discoblocks${DEV} &&
+chroot /host nsenter --target 1 --mount mount ${DEV} /tmp/discoblocks${DEV} &&
+trap "chroot /host nsenter --target 1 --mount umount /tmp/discoblocks${DEV}" EXIT &&
+(
+	([ "${FS}" = "ext3" ] && chroot /host nsenter --target 1 --mount resize2fs ${DEV}) ||
+	([ "${FS}" = "ext4" ] && chroot /host nsenter --target 1 --mount resize2fs ${DEV}) ||
+	([ "${FS}" = "xfs" ] && chroot /host nsenter --target 1 --mount xfs_growfs -d ${DEV}) ||
+	([ "${FS}" = "btrfs" ] && chroot /host nsenter --target 1 --mount btrfs filesystem resize max ${DEV}) ||
+	echo unsupported file-system $FS
+)`
 
 // RenderMetricsSidecar returns the metrics sidecar
 func RenderMetricsSidecar() (*corev1.Container, error) {
@@ -123,26 +133,59 @@ func RenderMetricsSidecar() (*corev1.Container, error) {
 	return &sidecar, nil
 }
 
-// RenderHostJob returns the job executed on host
-func RenderHostJob(pvcName, namespace, nodeName, dev, fs, mountPoint string, containerIDs []string, getCommand func() (string, error)) (*batchv1.Job, error) {
-	hostCommand, err := getCommand()
-	if err != nil {
-		return nil, fmt.Errorf("unable to get command: %w", err)
+// RenderMountJob returns the mount job executed on host
+func RenderMountJob(pvcName, pvName, namespace, nodeName, fs, mountPoint string, containerIDs []string, preMountCommand, volumeMeta string, owner metav1.OwnerReference) (*batchv1.Job, error) {
+	if preMountCommand != "" {
+		preMountCommand += " && "
 	}
 
-	hostCommand = string(hostCommandReplacePattern.ReplaceAll([]byte(hostCommand), []byte(hostCommandPrefix)))
+	mountCommand := fmt.Sprintf(mountCommandTemplate, preMountCommand)
+	mountCommand = string(hostCommandReplacePattern.ReplaceAll([]byte(mountCommand), []byte(hostCommandPrefix)))
 
 	jobName, err := RenderResourceName(true, fmt.Sprintf("%d", time.Now().UnixNano()), pvcName, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("unable to render resource name: %w", err)
 	}
 
-	template := fmt.Sprintf(hostJobTemplate, jobName, namespace, nodeName, mountPoint, strings.Join(containerIDs, " "), pvcName, dev, fs, hostCommand)
+	template := fmt.Sprintf(hostJobTemplate, jobName, namespace, nodeName, mountPoint, strings.Join(containerIDs, " "), pvcName, pvName, fs, volumeMeta, mountCommand)
 
 	job := batchv1.Job{}
 	if err := yaml.Unmarshal([]byte(template), &job); err != nil {
 		println(template)
 		return nil, fmt.Errorf("unable to unmarshal job: %w", err)
+	}
+
+	job.OwnerReferences = []metav1.OwnerReference{
+		owner,
+	}
+
+	return &job, nil
+}
+
+// RenderResizeJob returns the resize job executed on host
+func RenderResizeJob(pvcName, pvName, namespace, nodeName, fs, preResizeCommand, volumeMeta string, owner metav1.OwnerReference) (*batchv1.Job, error) {
+	if preResizeCommand != "" {
+		preResizeCommand += " && "
+	}
+
+	resizeCommand := fmt.Sprintf(resizeCommandTemplate, preResizeCommand)
+	resizeCommand = string(hostCommandReplacePattern.ReplaceAll([]byte(resizeCommand), []byte(hostCommandPrefix)))
+
+	jobName, err := RenderResourceName(true, fmt.Sprintf("%d", time.Now().UnixNano()), pvcName, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("unable to render resource name: %w", err)
+	}
+
+	template := fmt.Sprintf(hostJobTemplate, jobName, namespace, nodeName, "", "", pvcName, pvName, fs, volumeMeta, resizeCommand)
+
+	job := batchv1.Job{}
+	if err := yaml.Unmarshal([]byte(template), &job); err != nil {
+		println(template)
+		return nil, fmt.Errorf("unable to unmarshal job: %w", err)
+	}
+
+	job.OwnerReferences = []metav1.OwnerReference{
+		owner,
 	}
 
 	return &job, nil
@@ -178,6 +221,29 @@ func NewPVC(config *discoblocksondatiov1.DiskConfig, prefix string, driver *driv
 	}
 
 	return pvc, nil
+}
+
+// NewStorageClass constructs a new StorageClass
+func NewStorageClass(sc *storagev1.StorageClass, scAllowedTopology []corev1.TopologySelectorTerm) (*storagev1.StorageClass, error) {
+	topologyItems := ""
+	for _, ti := range scAllowedTopology {
+		topologyItems += ti.String()
+	}
+
+	tmpScName, err := RenderResourceName(true, string(sc.UID), sc.Name, topologyItems)
+	if err != nil {
+		return nil, fmt.Errorf("failed to render RenderResourceName of tmp StorageClass: %w", err)
+	}
+
+	topologySC := sc.DeepCopy()
+	topologySC.UID = ""
+	topologySC.ResourceVersion = ""
+	topologySC.Name = tmpScName
+	bm := storagev1.VolumeBindingImmediate
+	topologySC.VolumeBindingMode = &bm
+	topologySC.AllowedTopologies = scAllowedTopology
+
+	return topologySC, nil
 }
 
 // IsOwnedByDaemonSet detects is parent DaemonSet

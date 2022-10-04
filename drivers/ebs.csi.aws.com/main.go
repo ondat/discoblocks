@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/valyala/fastjson"
 )
@@ -13,12 +14,6 @@ func main() {}
 func IsStorageClassValid() {
 	json := []byte(os.Getenv("STORAGE_CLASS_JSON"))
 
-	if !fastjson.Exists(json, "volumeBindingMode") || fastjson.GetString(json, "volumeBindingMode") != "WaitForFirstConsumer" {
-		fmt.Fprint(os.Stderr, "only volumeBindingMode WaitForFirstConsumer is supported")
-		fmt.Fprint(os.Stdout, false)
-		return
-	}
-
 	if !fastjson.Exists(json, "allowVolumeExpansion") || !fastjson.GetBool(json, "allowVolumeExpansion") {
 		fmt.Fprint(os.Stderr, "only allowVolumeExpansion true is supported")
 		fmt.Fprint(os.Stdout, false)
@@ -26,6 +21,26 @@ func IsStorageClassValid() {
 	}
 
 	fmt.Fprint(os.Stdout, true)
+}
+
+//export GetStorageClassAllowedTopology
+func GetStorageClassAllowedTopology() {
+	json := []byte(os.Getenv("NODE_JSON"))
+
+	zone := fastjson.GetString(json, "metadata", "labels", "topology.kubernetes.io/zone")
+	if zone == "" {
+		fmt.Fprint(os.Stderr, "metadata.labels.'topology.kubernetes.io/zone' not found")
+		return
+	}
+
+	fmt.Fprintf(os.Stdout, `[{
+	"matchLabelExpressions": [
+		{
+			"key": "topology.kubernetes.io/zone",
+			"values": [ "%s" ]
+		}
+	]
+}]`, zone)
 }
 
 //export GetPVCStub
@@ -54,37 +69,39 @@ func GetCSIDriverPodLabels() {
 	fmt.Fprint(os.Stdout, `{ "app": "ebs-csi-controller" }`)
 }
 
-//export GetMountCommand
-func GetMountCommand() {
-	fmt.Fprint(os.Stdout, `DEV=$(chroot /host nsenter --target 1 --mount readlink -f ${DEV} | sed "s|.*/||") &&
-chroot /host nsenter --target 1 --mount mkfs.${FS} /dev/${DEV} &&
-chroot /host nsenter --target 1 --mount mkdir -p /var/lib/kubelet/plugins/kubernetes.io/csi/pv/${PVC_NAME} &&
-chroot /host nsenter --target 1 --mount mount /dev/${DEV} /var/lib/kubelet/plugins/kubernetes.io/csi/pv/${PVC_NAME} &&
-DEV_MAJOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV} | awk '{print $3}'  | awk '{split($0,a,":"); print a[1]}') &&
-DEV_MINOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV} | awk '{print $3}'  | awk '{split($0,a,":"); print a[2]}') &&
-for CONTAINER_ID in ${CONTAINER_IDS}; do
-	PID=$(docker inspect -f '{{.State.Pid}}' ${CONTAINER_ID} || crictl inspect --output go-template --template '{{.info.pid}}' ${CONTAINER_ID}) &&
-	chroot /host nsenter --target ${PID} --mount mkdir -p /dev ${MOUNT_POINT} &&
-	chroot /host nsenter --target ${PID} --pid --mount mknod /dev/${DEV} b ${DEV_MAJOR} ${DEV_MINOR} &&
-	chroot /host nsenter --target ${PID} --mount mount /dev/${DEV} ${MOUNT_POINT}
-done`)
+//export GetPreMountCommand
+func GetPreMountCommand() {
+	json := []byte(os.Getenv("PERSISTENT_VOLUME_JSON"))
+
+	volumeHandle := strings.ReplaceAll(fastjson.GetString(json, "spec", "csi", "volumeHandle"), "-", "")
+	if volumeHandle == "" {
+		fmt.Fprint(os.Stderr, "spec.csi.volumeHandle not found")
+		return
+	}
+
+	fmt.Fprintf(os.Stdout, `DEV=$(nvme list | grep %s | awk '{print $1}') &&
+(chroot /host nsenter --target 1 --mount mkfs.${FS} ${DEV} ||:)`,
+		volumeHandle)
 }
 
-//export GetResizeCommand
-func GetResizeCommand() {
-	fmt.Fprint(os.Stdout, `DEV=$(chroot /host nsenter --target 1 --mount readlink -f ${DEV}) &&
-(
-	([ "${FS}" = "ext3" ] && chroot /host nsenter --target 1 --mount resize2fs ${DEV}) ||
-	([ "${FS}" = "ext4" ] && chroot /host nsenter --target 1 --mount resize2fs ${DEV}) ||
-	([ "${FS}" = "xfs" ] && chroot /host nsenter --target 1 --mount xfs_growfs -d ${DEV}) ||
-	([ "${FS}" = "btrfs" ] && chroot /host nsenter --target 1 --mount btrfs filesystem resize max ${DEV}) ||
-	echo unsupported file-system $FS
-)
-	`)
-	fmt.Fprint(os.Stdout, `DEV=$(chroot /host nsenter --target 1 --mount readlink -f ${DEV}) && chroot /host nsenter --target 1 --mount resize2fs ${DEV}`)
+//export GetPreResizeCommand
+func GetPreResizeCommand() {
+	json := []byte(os.Getenv("PERSISTENT_VOLUME_JSON"))
+
+	volumeHandle := strings.ReplaceAll(fastjson.GetString(json, "spec", "csi", "volumeHandle"), "-", "")
+	if volumeHandle == "" {
+		fmt.Fprint(os.Stderr, "spec.csi.volumeHandle not found")
+		return
+	}
+
+	fmt.Fprintf(os.Stdout, `DEV=$(nvme list | grep %s | awk '{print $1}')`,
+		volumeHandle)
+}
+
+//export IsFileSystemManaged
+func IsFileSystemManaged() {
+	fmt.Fprint(os.Stdout, false)
 }
 
 //export WaitForVolumeAttachmentMeta
-func WaitForVolumeAttachmentMeta() {
-	fmt.Fprint(os.Stdout, "devicePath")
-}
+func WaitForVolumeAttachmentMeta() {}

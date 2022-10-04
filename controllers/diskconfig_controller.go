@@ -127,6 +127,8 @@ func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 }
 
 func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, configNamespace string, logger logr.Logger) (ctrl.Result, error) {
+	nsFinalizer := utils.RenderFinalizer(configName, configNamespace)
+
 	logger.Info("Fetch StrorageClasses...")
 
 	scList := storagev1.StorageClassList{}
@@ -134,17 +136,15 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 		return ctrl.Result{}, fmt.Errorf("unable to list StorageClasses: %w", err)
 	}
 
-	scFinalizer := utils.RenderFinalizer(configName, configNamespace)
-
 	for i := range scList.Items {
-		if scList.Items[i].DeletionTimestamp != nil || !controllerutil.ContainsFinalizer(&scList.Items[i], scFinalizer) {
+		if !controllerutil.ContainsFinalizer(&scList.Items[i], nsFinalizer) {
 			continue
 		}
 
-		controllerutil.RemoveFinalizer(&scList.Items[i], scFinalizer)
+		controllerutil.RemoveFinalizer(&scList.Items[i], nsFinalizer)
 
 		logger := logger.WithValues("sc_name", scList.Items[i].Name)
-		logger.Info("Remove StorageClass finalizer...", "finalizer", scFinalizer)
+		logger.Info("Remove StorageClass finalizer...", "finalizer", nsFinalizer)
 
 		if err := r.Client.Update(ctx, &scList.Items[i]); err != nil {
 			logger.Info("Failed to remove finalizer of StorageClass", "error", err.Error())
@@ -170,7 +170,7 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 	pvcSelector := labels.NewSelector().Add(*label)
 
 	pvcList := corev1.PersistentVolumeClaimList{}
-	if err = r.List(ctx, &pvcList, &client.ListOptions{
+	if err = r.Client.List(ctx, &pvcList, &client.ListOptions{
 		Namespace:     configNamespace,
 		LabelSelector: pvcSelector,
 	}); err != nil {
@@ -190,7 +190,7 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 		go func() {
 			defer wg.Done()
 
-			unlock, err := utils.WaitForSemaphore(ctx, sem, errChan)
+			unlock, err := utils.WaitForSemaphore(ctx, sem)
 			if err != nil {
 				logger.Info("Context deadline")
 				errChan <- fmt.Errorf("context deadline %s->%s", pvcList.Items[i].GetNamespace(), pvcList.Items[i].GetName())
@@ -203,7 +203,7 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 				logger := logger.WithValues("pvc_name", pvcList.Items[i].Name, "pvc_namespace", pvcList.Items[i].Namespace)
 				logger.Info("Update PVC finalizer...", "finalizer", finalizer)
 
-				if err = r.Update(ctx, &pvcList.Items[i]); err != nil {
+				if err = r.Client.Update(ctx, &pvcList.Items[i]); err != nil {
 					logger.Info("Failed to remove finalizer of PVC", "error", err.Error())
 					errChan <- fmt.Errorf("unable to remove finalizer of PVC %s->%s: %w", pvcList.Items[i].Namespace, pvcList.Items[i].Name, err)
 					return
@@ -249,7 +249,6 @@ func (r *DiskConfigReconciler) reconcileUpdate(ctx context.Context, config *disc
 	logger = logger.WithValues("sc_name", config.Spec.StorageClassName)
 
 	scFinalizer := utils.RenderFinalizer(config.Name, config.Namespace)
-
 	if !controllerutil.ContainsFinalizer(&sc, scFinalizer) {
 		controllerutil.AddFinalizer(&sc, scFinalizer)
 
