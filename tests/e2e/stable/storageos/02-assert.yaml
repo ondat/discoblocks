@@ -62,6 +62,18 @@ metadata:
 status:
   availableReplicas: 1
 ---
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: nginx
+  name: diskconfig-nginx
+  namespace: default
+spec:
+  hostPID: true
+status:
+  phase: Running
+---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:

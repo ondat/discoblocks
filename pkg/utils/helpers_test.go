@@ -127,8 +127,3 @@ func TestParsePrometheusMetricValue(t *testing.T) {
 	assert.Nil(t, err, "invalid metric")
 	assert.Equal(t, float64(1020678144), value)
 }
-
-func TestCompareStringNaturalOrder(t *testing.T) {
-	assert.True(t, CompareStringNaturalOrder("", "foo-1"))
-	assert.True(t, CompareStringNaturalOrder("foo-2", "foo-10"))
-}

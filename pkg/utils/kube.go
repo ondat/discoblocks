@@ -11,6 +11,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 )
 
@@ -37,7 +38,7 @@ spec:
 `
 
 const metricsTeamplate = `name: discoblocks-metrics
-image: bitnami/node-exporter:1.3.1
+image: bitnami/node-exporter:1.4.0
 ports:
 - containerPort: 9100
   protocol: TCP
@@ -45,6 +46,48 @@ command:
 - /opt/bitnami/node-exporter/bin/node_exporter
 - --collector.disable-defaults
 - --collector.filesystem
+- --collector.filesystem.mount-points-exclude="*"
+- --collector.filesystem.fs-types-exclude="^(ext[2-4]|btrfs|xfs)$"
+securityContext:
+  privileged: false
+`
+
+const attachJobTemplate = `apiVersion: batch/v1
+kind: Job
+metadata:
+  name: "%s"
+  namespace: "%s"
+  labels:
+    app: discoblocks
+spec:
+  template:
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchFields:
+              - key: metadata.name
+                operator: In
+                values:
+                - "%s"
+      containers:
+      - name: attach
+        image: redhat/ubi8-micro@sha256:4f6f8db9a6dc949d9779a57c43954b251957bd4d019a37edbbde8ed5228fe90a
+        command:
+        - ls
+        - /pvc
+        volumeMounts:
+        - mountPath: /pvc
+          name: attach
+          readOnly: true
+      restartPolicy: Never
+      volumes:
+      - name: attach
+        persistentVolumeClaim:
+          claimName: "%s"
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
 `
 
 const hostJobTemplate = `apiVersion: batch/v1
@@ -70,6 +113,8 @@ spec:
         - name: PVC_NAME
           value: "%s"
         - name: DEV
+          value: "%s"
+        - name: DEV_PATH
           value: "%s"
         - name: FS
           value: "%s"
@@ -100,8 +145,40 @@ spec:
        - hostPath:
           path: /
          name: host
-  backoffLimit: 10
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
 `
+
+// Mount command, merged together mountCommandTemplate(mkfsCommandTemplate, podMountTemplate)
+const (
+	mountCommandTemplate = `sleep infinity ; DEV=$(chroot /host nsenter --target 1 --mount %s) &&
+%s
+chroot /host nsenter --target 1 --mount mkdir -p %s &&
+chroot /host nsenter --target 1 --mount mount ${DEV_PATH}/${DEV} %s &&
+%s
+echo ok`
+
+	mkfsCommandTemplate = `chroot /host nsenter --target 1 --mount mkfs.${FS} ${DEV_PATH}/${DEV} &&`
+
+	podMountTemplate = `DEV_MAJOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV} | awk '{print $3}'  | awk '{split($0,a,":"); print a[1]}') &&
+DEV_MINOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV} | awk '{print $3}'  | awk '{split($0,a,":"); print a[2]}') &&
+for CONTAINER_ID in ${CONTAINER_IDS}; do
+	PID=$(docker inspect -f '{{.State.Pid}}' ${CONTAINER_ID} || crictl inspect --output go-template --template '{{.info.pid}}' ${CONTAINER_ID}) &&
+	chroot /host nsenter --target ${PID} --mount mkdir -p /dev ${MOUNT_POINT} &&
+	chroot /host nsenter --target ${PID} --pid --mount mknod /dev/${DEV} b ${DEV_MAJOR} ${DEV_MINOR} &&
+	chroot /host nsenter --target ${PID} --mount mount /dev/${DEV} ${MOUNT_POINT}
+done &&`
+)
+
+const resizeCommandTemplate = `DEV=$(chroot /host nsenter --target 1 --mount readlink -f ${DEV}) &&
+(
+	([ "${FS}" = "ext3" ] && chroot /host nsenter --target 1 --mount resize2fs ${DEV}) ||
+	([ "${FS}" = "ext4" ] && chroot /host nsenter --target 1 --mount resize2fs ${DEV}) ||
+	([ "${FS}" = "xfs" ] && chroot /host nsenter --target 1 --mount xfs_growfs -d ${DEV}) ||
+	([ "${FS}" = "btrfs" ] && chroot /host nsenter --target 1 --mount btrfs filesystem resize max ${DEV}) ||
+	echo unsupported file-system $FS
+) &&
+echo ok`
 
 // RenderMetricsService returns the metrics service
 func RenderMetricsService(name, namespace string) (*corev1.Service, error) {
@@ -114,35 +191,105 @@ func RenderMetricsService(name, namespace string) (*corev1.Service, error) {
 }
 
 // RenderMetricsSidecar returns the metrics sidecar
-func RenderMetricsSidecar() (*corev1.Container, error) {
+func RenderMetricsSidecar(privileged bool) (*corev1.Container, error) {
 	sidecar := corev1.Container{}
 	if err := yaml.Unmarshal([]byte(metricsTeamplate), &sidecar); err != nil {
 		return nil, fmt.Errorf("unable to unmarshal container: %w", err)
 	}
 
+	sidecar.SecurityContext.Privileged = &privileged
+
+	if privileged {
+		sidecar.VolumeMounts = []corev1.VolumeMount{
+			{
+				Name:      "varlibkubelet",
+				MountPath: "/var/lib/kubelet",
+				ReadOnly:  true,
+			},
+		}
+	}
+
 	return &sidecar, nil
 }
 
-// RenderHostJob returns the job executed on host
-func RenderHostJob(pvcName, namespace, nodeName, dev, fs, mountPoint string, containerIDs []string, getCommand func() (string, error)) (*batchv1.Job, error) {
-	hostCommand, err := getCommand()
+// RenderAttachJob returns the mount job executed on host
+func RenderAttachJob(pvcName, namespace, nodeName string, owner metav1.OwnerReference) (*batchv1.Job, error) {
+	jobName, err := RenderResourceName(true, fmt.Sprintf("%d", time.Now().UnixNano()), pvcName, namespace)
 	if err != nil {
-		return nil, fmt.Errorf("unable to get command: %w", err)
+		return nil, fmt.Errorf("unable to render resource name: %w", err)
 	}
 
-	hostCommand = string(hostCommandReplacePattern.ReplaceAll([]byte(hostCommand), []byte(hostCommandPrefix)))
+	template := fmt.Sprintf(attachJobTemplate, jobName, namespace, nodeName, pvcName)
+
+	job := batchv1.Job{}
+	if err := yaml.Unmarshal([]byte(template), &job); err != nil {
+		println(template)
+		return nil, fmt.Errorf("unable to unmarshal job: %w", err)
+	}
+
+	job.OwnerReferences = []metav1.OwnerReference{
+		owner,
+	}
+
+	return &job, nil
+}
+
+// RenderMountJob returns the mount job executed on host
+func RenderMountJob(pvcName, namespace, nodeName, dev, devPath, fs, mountPoint string, containerIDs []string, deviceLookupCommand string, fsManaged, hostPID bool, owner metav1.OwnerReference) (*batchv1.Job, error) {
+	mkfsCmd := ""
+	if !fsManaged {
+		mkfsCmd = mkfsCommandTemplate
+	}
+
+	podMount := ""
+	hostMountPoint := mountPoint
+	if !hostPID {
+		podMount = podMountTemplate
+		hostMountPoint = "/var/lib/kubelet/plugins/kubernetes.io/csi/pv/${PVC_NAME}"
+	}
+
+	mountCommand := fmt.Sprintf(mountCommandTemplate, deviceLookupCommand, mkfsCmd, hostMountPoint, hostMountPoint, podMount)
+	mountCommand = string(hostCommandReplacePattern.ReplaceAll([]byte(mountCommand), []byte(hostCommandPrefix)))
 
 	jobName, err := RenderResourceName(true, fmt.Sprintf("%d", time.Now().UnixNano()), pvcName, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("unable to render resource name: %w", err)
 	}
 
-	template := fmt.Sprintf(hostJobTemplate, jobName, namespace, nodeName, mountPoint, strings.Join(containerIDs, " "), pvcName, dev, fs, hostCommand)
+	template := fmt.Sprintf(hostJobTemplate, jobName, namespace, nodeName, mountPoint, strings.Join(containerIDs, " "), pvcName, dev, devPath, fs, mountCommand)
 
 	job := batchv1.Job{}
 	if err := yaml.Unmarshal([]byte(template), &job); err != nil {
 		println(template)
 		return nil, fmt.Errorf("unable to unmarshal job: %w", err)
+	}
+
+	job.OwnerReferences = []metav1.OwnerReference{
+		owner,
+	}
+
+	return &job, nil
+}
+
+// RenderResizeJob returns the resize job executed on host
+func RenderResizeJob(pvcName, namespace, nodeName, dev, fs string, owner metav1.OwnerReference) (*batchv1.Job, error) {
+	resizeCommand := string(hostCommandReplacePattern.ReplaceAll([]byte(resizeCommandTemplate), []byte(hostCommandPrefix)))
+
+	jobName, err := RenderResourceName(true, fmt.Sprintf("%d", time.Now().UnixNano()), pvcName, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("unable to render resource name: %w", err)
+	}
+
+	template := fmt.Sprintf(hostJobTemplate, jobName, namespace, nodeName, "", "", pvcName, dev, "", fs, resizeCommand)
+
+	job := batchv1.Job{}
+	if err := yaml.Unmarshal([]byte(template), &job); err != nil {
+		println(template)
+		return nil, fmt.Errorf("unable to unmarshal job: %w", err)
+	}
+
+	job.OwnerReferences = []metav1.OwnerReference{
+		owner,
 	}
 
 	return &job, nil

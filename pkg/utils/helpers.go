@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"regexp"
 	"strings"
 	"time"
 
@@ -153,24 +152,4 @@ func ParsePrometheusMetricValue(metric string) (float64, error) {
 	f, _ := flt.Float64()
 
 	return f, err
-}
-
-// CompareStringNaturalOrder compares string in natural order
-func CompareStringNaturalOrder(a, b string) bool {
-	numberRegex := regexp.MustCompile(`\d+`)
-
-	convert := func(i string) string {
-		numbers := map[string]bool{}
-		for _, n := range numberRegex.FindAll([]byte(i), -1) {
-			numbers[string(n)] = true
-		}
-
-		for n := range numbers {
-			i = strings.ReplaceAll(i, n, fmt.Sprintf("%09s", n))
-		}
-
-		return i
-	}
-
-	return convert(a) < convert(b)
 }

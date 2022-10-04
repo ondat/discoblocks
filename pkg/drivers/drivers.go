@@ -186,54 +186,84 @@ func (d *Driver) GetCSIDriverDetails() (string, map[string]string, error) {
 	return string(namespace), labels, nil
 }
 
-// GetMountCommand creates a PersistentVolumeClaim for driver
-func (d *Driver) GetMountCommand() (string, error) {
+// GetDevicePath returns device path
+func (d *Driver) GetDevicePath() (string, error) {
 	wasiEnv, instance, err := d.init(nil)
 	if err != nil {
 		return "", fmt.Errorf("unable to init instance: %w", err)
 	}
 
-	getMountCommand, err := instance.Exports.GetRawFunction("GetMountCommand")
+	getDevicePath, err := instance.Exports.GetRawFunction("GetDevicePath")
 	if err != nil {
-		return "", fmt.Errorf("unable to find GetMountCommand: %w", err)
+		return "", fmt.Errorf("unable to find GetDevicePath: %w", err)
 	}
 
-	_, err = getMountCommand.Native()()
+	_, err = getDevicePath.Native()()
 	if err != nil {
-		return "", fmt.Errorf("unable to call GetMountCommand: %w", err)
+		return "", fmt.Errorf("unable to call GetDevicePath: %w", err)
 	}
 
 	errOut := string(wasiEnv.ReadStderr())
 	if errOut != "" {
-		return "", fmt.Errorf("function error GetMountCommand: %s", errOut)
+		return "", fmt.Errorf("function error GetDevicePath: %s", errOut)
 	}
 
 	return string(wasiEnv.ReadStdout()), nil
 }
 
-// GetResizeCommand gets resize command to execute on the host
-func (d *Driver) GetResizeCommand() (string, error) {
+// GetDeviceLookupCommand returns device path
+func (d *Driver) GetDeviceLookupCommand() (string, error) {
 	wasiEnv, instance, err := d.init(nil)
 	if err != nil {
 		return "", fmt.Errorf("unable to init instance: %w", err)
 	}
 
-	getResizeCommand, err := instance.Exports.GetRawFunction("GetResizeCommand")
+	getDeviceLookupCommand, err := instance.Exports.GetRawFunction("GetDeviceLookupCommand")
 	if err != nil {
-		return "", fmt.Errorf("unable to find GetResizeCommand: %w", err)
+		return "", fmt.Errorf("unable to find GetDeviceLookupCommand: %w", err)
 	}
 
-	_, err = getResizeCommand.Native()()
+	_, err = getDeviceLookupCommand.Native()()
 	if err != nil {
-		return "", fmt.Errorf("unable to call GetResizeCommand: %w", err)
+		return "", fmt.Errorf("unable to call GetDeviceLookupCommand: %w", err)
 	}
 
 	errOut := string(wasiEnv.ReadStderr())
 	if errOut != "" {
-		return "", fmt.Errorf("function error GetResizeCommand: %s", errOut)
+		return "", fmt.Errorf("function error GetDeviceLookupCommand: %s", errOut)
 	}
 
 	return string(wasiEnv.ReadStdout()), nil
+}
+
+// IsFileSystemManaged determines is file system managed by driver
+func (d *Driver) IsFileSystemManaged() (bool, error) {
+	wasiEnv, instance, err := d.init(nil)
+	if err != nil {
+		return false, fmt.Errorf("unable to init instance: %w", err)
+	}
+
+	isFileSystemManaged, err := instance.Exports.GetRawFunction("IsFileSystemManaged")
+	if err != nil {
+		return false, fmt.Errorf("unable to find IsFileSystemManaged: %w", err)
+	}
+
+	_, err = isFileSystemManaged.Native()()
+	if err != nil {
+		return false, fmt.Errorf("unable to call IsFileSystemManaged: %w", err)
+	}
+
+	errOut := string(wasiEnv.ReadStderr())
+	if errOut != "" {
+		return false, fmt.Errorf("function error IsFileSystemManaged: %s", errOut)
+	}
+
+	resp, err := strconv.ParseBool(string(wasiEnv.ReadStdout()))
+	if err != nil {
+		return false, fmt.Errorf("unable to parse output: %w", err)
+	}
+
+	return resp, nil
 }
 
 // WaitForVolumeAttachmentMeta defines wait for device info of plugin

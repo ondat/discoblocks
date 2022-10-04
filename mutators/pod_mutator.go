@@ -101,12 +101,6 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 		logger := logger.WithValues("dc_name", config.Name, "sc_name", config.Spec.StorageClassName)
 
-		if pod.Spec.HostPID && !config.Spec.Policy.Pause {
-			msg := "Autoscaling and Pod.Spec.HostPID are not supported together"
-			logger.Info(msg)
-			return errorMode(http.StatusBadRequest, msg, errors.New(strings.ToLower(msg)))
-		}
-
 		if config.Spec.AvailabilityMode == discoblocksondatiov1.ReadWriteDaemon {
 			if nodeName == "" {
 				msg := "Node name not found for ReadWriteDaemons at node affinities"
@@ -273,12 +267,23 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 	logger.Info("Attach sidecar...")
 
-	metricsSideCar, err := utils.RenderMetricsSidecar()
+	metricsSideCar, err := utils.RenderMetricsSidecar(pod.Spec.HostPID)
 	if err != nil {
 		logger.Error(err, "Metrics sidecar template invalid")
 		return admission.Allowed("Metrics sidecar template invalid")
 	}
 	pod.Spec.Containers = append(pod.Spec.Containers, *metricsSideCar)
+
+	for _, vm := range metricsSideCar.VolumeMounts {
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+			Name: vm.Name,
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: vm.MountPath,
+				},
+			},
+		})
+	}
 
 	logger.Info("Attach volume mounts...")
 
