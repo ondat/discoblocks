@@ -112,11 +112,11 @@ spec:
           value: "%s"
         - name: PVC_NAME
           value: "%s"
-        - name: DEV
-          value: "%s"
-        - name: DEV_PATH
+        - name: PV_NAME
           value: "%s"
         - name: FS
+          value: "%s"
+        - name: VOLUME_ATTACHMENT_META
           value: "%s"
         command:
         - bash
@@ -149,29 +149,27 @@ spec:
   ttlSecondsAfterFinished: 86400
 `
 
-// Mount command, merged together mountCommandTemplate(mkfsCommandTemplate, podMountTemplate)
 const (
-	mountCommandTemplate = `sleep infinity ; DEV=$(chroot /host nsenter --target 1 --mount %s) &&
-%s
-chroot /host nsenter --target 1 --mount mkdir -p %s &&
-chroot /host nsenter --target 1 --mount mount ${DEV_PATH}/${DEV} %s &&
+	mountCommandTemplate = `%s
+chroot /host nsenter --target 1 --mount mkdir -p /var/lib/kubelet/plugins/kubernetes.io/csi/pv/${PV_NAME}/globalmount &&
+chroot /host nsenter --target 1 --mount mount ${DEV} /var/lib/kubelet/plugins/kubernetes.io/csi/pv/${PV_NAME}/globalmount &&
 %s
 echo ok`
 
-	mkfsCommandTemplate = `chroot /host nsenter --target 1 --mount mkfs.${FS} ${DEV_PATH}/${DEV} &&`
-
-	podMountTemplate = `DEV_MAJOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV} | awk '{print $3}'  | awk '{split($0,a,":"); print a[1]}') &&
+	mknodMountTemplate = `DEV_MAJOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV} | awk '{print $3}'  | awk '{split($0,a,":"); print a[1]}') &&
 DEV_MINOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV} | awk '{print $3}'  | awk '{split($0,a,":"); print a[2]}') &&
 for CONTAINER_ID in ${CONTAINER_IDS}; do
 	PID=$(docker inspect -f '{{.State.Pid}}' ${CONTAINER_ID} || crictl inspect --output go-template --template '{{.info.pid}}' ${CONTAINER_ID}) &&
 	chroot /host nsenter --target ${PID} --mount mkdir -p /dev ${MOUNT_POINT} &&
-	chroot /host nsenter --target ${PID} --pid --mount mknod /dev/${DEV} b ${DEV_MAJOR} ${DEV_MINOR} &&
-	chroot /host nsenter --target ${PID} --mount mount /dev/${DEV} ${MOUNT_POINT}
+	chroot /host nsenter --target ${PID} --pid --mount mknod ${DEV} b ${DEV_MAJOR} ${DEV_MINOR} &&
+	chroot /host nsenter --target ${PID} --mount mount ${DEV} ${MOUNT_POINT}
 done &&`
+
+	bindMountTemplate = `chroot /host nsenter --target ${PID} --mount mount -o bind /var/lib/kubelet/plugins/kubernetes.io/csi/pv/${PV_NAME}/globalmount ${MOUNT_POINT} &&`
 )
 
-const resizeCommandTemplate = `DEV=$(chroot /host nsenter --target 1 --mount readlink -f ${DEV}) &&
-(
+const resizeCommandTemplate = `%s
+(:pvc:pvc
 	([ "${FS}" = "ext3" ] && chroot /host nsenter --target 1 --mount resize2fs ${DEV}) ||
 	([ "${FS}" = "ext4" ] && chroot /host nsenter --target 1 --mount resize2fs ${DEV}) ||
 	([ "${FS}" = "xfs" ] && chroot /host nsenter --target 1 --mount xfs_growfs -d ${DEV}) ||
@@ -235,20 +233,17 @@ func RenderAttachJob(pvcName, namespace, nodeName string, owner metav1.OwnerRefe
 }
 
 // RenderMountJob returns the mount job executed on host
-func RenderMountJob(pvcName, namespace, nodeName, dev, devPath, fs, mountPoint string, containerIDs []string, deviceLookupCommand string, fsManaged, hostPID bool, owner metav1.OwnerReference) (*batchv1.Job, error) {
-	mkfsCmd := ""
-	if !fsManaged {
-		mkfsCmd = mkfsCommandTemplate
+func RenderMountJob(pvcName, pvName, namespace, nodeName, fs, mountPoint string, containerIDs []string, preMountCommand string, hostPID bool, volumeMeta string, owner metav1.OwnerReference) (*batchv1.Job, error) {
+	bindMount := mknodMountTemplate
+	if hostPID {
+		bindMount = bindMountTemplate
 	}
 
-	podMount := ""
-	hostMountPoint := mountPoint
-	if !hostPID {
-		podMount = podMountTemplate
-		hostMountPoint = "/var/lib/kubelet/plugins/kubernetes.io/csi/pv/${PVC_NAME}"
+	if preMountCommand != "" {
+		preMountCommand += " && "
 	}
 
-	mountCommand := fmt.Sprintf(mountCommandTemplate, deviceLookupCommand, mkfsCmd, hostMountPoint, hostMountPoint, podMount)
+	mountCommand := fmt.Sprintf(mountCommandTemplate, preMountCommand, bindMount)
 	mountCommand = string(hostCommandReplacePattern.ReplaceAll([]byte(mountCommand), []byte(hostCommandPrefix)))
 
 	jobName, err := RenderResourceName(true, fmt.Sprintf("%d", time.Now().UnixNano()), pvcName, namespace)
@@ -256,7 +251,7 @@ func RenderMountJob(pvcName, namespace, nodeName, dev, devPath, fs, mountPoint s
 		return nil, fmt.Errorf("unable to render resource name: %w", err)
 	}
 
-	template := fmt.Sprintf(hostJobTemplate, jobName, namespace, nodeName, mountPoint, strings.Join(containerIDs, " "), pvcName, dev, devPath, fs, mountCommand)
+	template := fmt.Sprintf(hostJobTemplate, jobName, namespace, nodeName, mountPoint, strings.Join(containerIDs, " "), pvcName, pvName, fs, volumeMeta, mountCommand)
 
 	job := batchv1.Job{}
 	if err := yaml.Unmarshal([]byte(template), &job); err != nil {
@@ -272,15 +267,20 @@ func RenderMountJob(pvcName, namespace, nodeName, dev, devPath, fs, mountPoint s
 }
 
 // RenderResizeJob returns the resize job executed on host
-func RenderResizeJob(pvcName, namespace, nodeName, dev, fs string, owner metav1.OwnerReference) (*batchv1.Job, error) {
-	resizeCommand := string(hostCommandReplacePattern.ReplaceAll([]byte(resizeCommandTemplate), []byte(hostCommandPrefix)))
+func RenderResizeJob(pvcName, pvName, namespace, nodeName, fs, preResizeCommand string, volumeMeta string, owner metav1.OwnerReference) (*batchv1.Job, error) {
+	if preResizeCommand != "" {
+		preResizeCommand += " && "
+	}
+
+	resizeCommand := fmt.Sprintf(resizeCommandTemplate, preResizeCommand)
+	resizeCommand = string(hostCommandReplacePattern.ReplaceAll([]byte(resizeCommand), []byte(hostCommandPrefix)))
 
 	jobName, err := RenderResourceName(true, fmt.Sprintf("%d", time.Now().UnixNano()), pvcName, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("unable to render resource name: %w", err)
 	}
 
-	template := fmt.Sprintf(hostJobTemplate, jobName, namespace, nodeName, "", "", pvcName, dev, "", fs, resizeCommand)
+	template := fmt.Sprintf(hostJobTemplate, jobName, namespace, nodeName, "", "", pvcName, pvName, fs, volumeMeta, resizeCommand)
 
 	job := batchv1.Job{}
 	if err := yaml.Unmarshal([]byte(template), &job); err != nil {

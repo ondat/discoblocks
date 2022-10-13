@@ -54,14 +54,14 @@ func GetCSIDriverPodLabels() {
 	fmt.Fprint(os.Stdout, `{ "app": "ebs-csi-controller" }`)
 }
 
-//export GetDevicePath
-func GetDevicePath() {
-	fmt.Fprint(os.Stdout, "/dev")
+//export GetPreMountCommand
+func GetPreMountCommand() {
+	fmt.Fprint(os.Stdout, `sleep infinity ; DEV=$(chroot /host nsenter --target 1 --mount mount | grep ${PV_NAME} | awk '{print $1}')`)
 }
 
-//export GetDeviceLookupCommand
-func GetDeviceLookupCommand() {
-	fmt.Fprint(os.Stdout, `readlink -f ${DEV} | sed "s|.*/||"`)
+//export GetPreResizeCommand
+func GetPreResizeCommand() {
+	GetPreMountCommand()
 }
 
 //export IsFileSystemManaged

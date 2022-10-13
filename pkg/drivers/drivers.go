@@ -186,51 +186,51 @@ func (d *Driver) GetCSIDriverDetails() (string, map[string]string, error) {
 	return string(namespace), labels, nil
 }
 
-// GetDevicePath returns device path
-func (d *Driver) GetDevicePath() (string, error) {
+// GetPreMountCommand returns pre mount command
+func (d *Driver) GetPreMountCommand() (string, error) {
 	wasiEnv, instance, err := d.init(nil)
 	if err != nil {
 		return "", fmt.Errorf("unable to init instance: %w", err)
 	}
 
-	getDevicePath, err := instance.Exports.GetRawFunction("GetDevicePath")
+	getPreMountCommand, err := instance.Exports.GetRawFunction("GetPreMountCommand")
 	if err != nil {
-		return "", fmt.Errorf("unable to find GetDevicePath: %w", err)
+		return "", fmt.Errorf("unable to find GetPreMountCommand: %w", err)
 	}
 
-	_, err = getDevicePath.Native()()
+	_, err = getPreMountCommand.Native()()
 	if err != nil {
-		return "", fmt.Errorf("unable to call GetDevicePath: %w", err)
+		return "", fmt.Errorf("unable to call GetPreMountCommand: %w", err)
 	}
 
 	errOut := string(wasiEnv.ReadStderr())
 	if errOut != "" {
-		return "", fmt.Errorf("function error GetDevicePath: %s", errOut)
+		return "", fmt.Errorf("function error GetPreMountCommand: %s", errOut)
 	}
 
 	return string(wasiEnv.ReadStdout()), nil
 }
 
-// GetDeviceLookupCommand returns device path
-func (d *Driver) GetDeviceLookupCommand() (string, error) {
+// GetPreResizeCommand returns pre resize command
+func (d *Driver) GetPreResizeCommand() (string, error) {
 	wasiEnv, instance, err := d.init(nil)
 	if err != nil {
 		return "", fmt.Errorf("unable to init instance: %w", err)
 	}
 
-	getDeviceLookupCommand, err := instance.Exports.GetRawFunction("GetDeviceLookupCommand")
+	getPreResizeCommand, err := instance.Exports.GetRawFunction("GetPreResizeCommand")
 	if err != nil {
-		return "", fmt.Errorf("unable to find GetDeviceLookupCommand: %w", err)
+		return "", fmt.Errorf("unable to find GetPreResizeCommand: %w", err)
 	}
 
-	_, err = getDeviceLookupCommand.Native()()
+	_, err = getPreResizeCommand.Native()()
 	if err != nil {
-		return "", fmt.Errorf("unable to call GetDeviceLookupCommand: %w", err)
+		return "", fmt.Errorf("unable to call GetPreResizeCommand: %w", err)
 	}
 
 	errOut := string(wasiEnv.ReadStderr())
 	if errOut != "" {
-		return "", fmt.Errorf("function error GetDeviceLookupCommand: %s", errOut)
+		return "", fmt.Errorf("function error GetPreResizeCommand: %s", errOut)
 	}
 
 	return string(wasiEnv.ReadStdout()), nil

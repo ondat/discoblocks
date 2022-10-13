@@ -5,7 +5,7 @@ metadata:
     discoblocks: diskconfig-sample
   name: diskconfig-sample
 spec:
-  hostPID: true
+  # hostPID: true
   containers:
   - name: alpine
     image: alpine:3.15.4

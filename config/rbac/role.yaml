@@ -44,7 +44,7 @@ rules:
   resources:
   - persistentvolumes
   verbs:
-  - list
+  - get
 - apiGroups:
   - ""
   resources:
@@ -142,5 +142,6 @@ rules:
   - volumeattachments
   verbs:
   - create
+  - get
   - list
   - watch

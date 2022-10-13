@@ -48,15 +48,13 @@ func GetCSIDriverPodLabels() {
 	fmt.Fprint(os.Stdout, `{ "app": "storageos", "app.kubernetes.io/component": "csi" }`)
 }
 
-//export GetDevicePath
-func GetDevicePath() {
-	fmt.Fprint(os.Stdout, "/var/lib/storageos/volumes")
+//export GetPreMountCommand
+func GetPreMountCommand() {
+	fmt.Fprint(os.Stdout, `DEV=/var/lib/storageos/volumes/$(chroot /host nsenter --target 1 --mount ls /var/lib/storageos/volumes -Atr | tail -1)`)
 }
 
-//export GetDeviceLookupCommand
-func GetDeviceLookupCommand() {
-	fmt.Fprint(os.Stdout, `ls ${DEV_PATH} -Atr | tail -1`)
-}
+//export GetPreResizeCommand
+func GetPreResizeCommand() {}
 
 //export IsFileSystemManaged
 func IsFileSystemManaged() {
