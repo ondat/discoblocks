@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/valyala/fastjson"
 )
@@ -13,12 +14,6 @@ func main() {}
 func IsStorageClassValid() {
 	json := []byte(os.Getenv("STORAGE_CLASS_JSON"))
 
-	if !fastjson.Exists(json, "volumeBindingMode") || fastjson.GetString(json, "volumeBindingMode") != "WaitForFirstConsumer" {
-		fmt.Fprint(os.Stderr, "only volumeBindingMode WaitForFirstConsumer is supported")
-		fmt.Fprint(os.Stdout, false)
-		return
-	}
-
 	if !fastjson.Exists(json, "allowVolumeExpansion") || !fastjson.GetBool(json, "allowVolumeExpansion") {
 		fmt.Fprint(os.Stderr, "only allowVolumeExpansion true is supported")
 		fmt.Fprint(os.Stdout, false)
@@ -26,6 +21,25 @@ func IsStorageClassValid() {
 	}
 
 	fmt.Fprint(os.Stdout, true)
+}
+
+//export GetStorageClassAllowedTopology
+func GetStorageClassAllowedTopology() {
+	json := []byte(os.Getenv("NODE_JSON"))
+
+	zone := fastjson.GetString(json, "metadata", "labels", "topology.kubernetes.io/zone")
+	if zone == "" {
+		fmt.Fprint(os.Stderr, "metadata.labels.topology.kubernetes.io/zone not found")
+	}
+
+	fmt.Fprintf(os.Stdout, `[{
+	"matchLabelExpressions": [
+		{
+			"key": "topology.kubernetes.io/zone",
+			"value": [ "%s" ]
+		}
+	]
+}]`, zone)
 }
 
 //export GetPVCStub
@@ -54,14 +68,21 @@ func GetCSIDriverPodLabels() {
 	fmt.Fprint(os.Stdout, `{ "app": "ebs-csi-controller" }`)
 }
 
-//export GetDevicePath
-func GetDevicePath() {
-	fmt.Fprint(os.Stdout, "/dev")
+//export GetPreMountCommand
+func GetPreMountCommand() {
+	json := []byte(os.Getenv("PERSISTENT_VOLUME_JSON"))
+
+	volumeHandle := strings.ReplaceAll(fastjson.GetString(json, "spec", "csi", "volumeHandle"), "-", "")
+	if volumeHandle == "" {
+		fmt.Fprint(os.Stderr, "spec.csi.volumeHandle not found")
+	}
+
+	fmt.Fprintf(os.Stdout, `DEV=$(nvme list | grep %s | awk '{print $1}') && chroot /host nsenter --target 1 --mount mkfs.${FS} ${DEV}`, volumeHandle)
 }
 
-//export GetDeviceLookupCommand
-func GetDeviceLookupCommand() {
-	fmt.Fprint(os.Stdout, `readlink -f ${DEV} | sed "s|.*/||"`)
+//export GetPreResizeCommand
+func GetPreResizeCommand() {
+	GetPreMountCommand()
 }
 
 //export IsFileSystemManaged
@@ -70,6 +91,4 @@ func IsFileSystemManaged() {
 }
 
 //export WaitForVolumeAttachmentMeta
-func WaitForVolumeAttachmentMeta() {
-	fmt.Fprint(os.Stdout, "devicePath")
-}
+func WaitForVolumeAttachmentMeta() {}

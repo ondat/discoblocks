@@ -57,13 +57,13 @@ var (
 //+kubebuilder:rbac:groups=discoblocks.ondat.io,resources=diskconfigs,verbs=get;list;watch;create;update;delete
 //+kubebuilder:rbac:groups=discoblocks.ondat.io,resources=diskconfigs/status,verbs=update
 //+kubebuilder:rbac:groups=discoblocks.ondat.io,resources=diskconfigs/finalizers,verbs=update
-//+kubebuilder:rbac:groups="storage.k8s.io",resources=volumeattachments,verbs=create;list;watch
-//+kubebuilder:rbac:groups="storage.k8s.io",resources=storageclasses,verbs=get;update
+//+kubebuilder:rbac:groups="storage.k8s.io",resources=volumeattachments,verbs=create;get;list;watch
+//+kubebuilder:rbac:groups="storage.k8s.io",resources=storageclasses,verbs=get;update;create
 //+kubebuilder:rbac:groups="storage.k8s.io",resources=storageclasses/finalizers,verbs=update
 //+kubebuilder:rbac:groups="batch",resources=jobs,verbs=create;list;watch;delete
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims/finalizers,verbs=update
-//+kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=list
+//+kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get
 //+kubebuilder:rbac:groups="",resources=services,verbs=create;update;delete
 //+kubebuilder:rbac:groups="",resources=services/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=endpoints,verbs=list;watch

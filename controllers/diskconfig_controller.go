@@ -249,7 +249,6 @@ func (r *DiskConfigReconciler) reconcileUpdate(ctx context.Context, config *disc
 	logger = logger.WithValues("sc_name", config.Spec.StorageClassName)
 
 	scFinalizer := utils.RenderFinalizer(config.Name, config.Namespace)
-
 	if !controllerutil.ContainsFinalizer(&sc, scFinalizer) {
 		controllerutil.AddFinalizer(&sc, scFinalizer)
 
