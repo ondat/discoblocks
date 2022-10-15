@@ -13,6 +13,12 @@ func main() {}
 func IsStorageClassValid() {
 	json := []byte(os.Getenv("STORAGE_CLASS_JSON"))
 
+	if fastjson.Exists(json, "volumeBindingMode") && fastjson.GetString(json, "volumeBindingMode") != "Immediate" {
+		fmt.Fprint(os.Stderr, "only volumeBindingMode Immediate is supported")
+		fmt.Fprint(os.Stdout, false)
+		return
+	}
+
 	if !fastjson.Exists(json, "allowVolumeExpansion") || !fastjson.GetBool(json, "allowVolumeExpansion") {
 		fmt.Fprint(os.Stderr, "only allowVolumeExpansion true is supported")
 		fmt.Fprint(os.Stdout, false)
@@ -21,6 +27,9 @@ func IsStorageClassValid() {
 
 	fmt.Fprint(os.Stdout, true)
 }
+
+//export GetStorageClassAllowedTopology
+func GetStorageClassAllowedTopology() {}
 
 //export GetPVCStub
 func GetPVCStub() {

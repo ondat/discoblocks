@@ -19,12 +19,6 @@ func TestRenderMetricsSidecar(t *testing.T) {
 	assert.Nil(t, err, "invalid sidecar template")
 }
 
-func TestRenderAttachJob(t *testing.T) {
-	_, err := RenderAttachJob("name", "namespace", "nodename", metav1.OwnerReference{})
-
-	assert.Nil(t, err, "invalid attach job")
-}
-
 func TestRenderMountJob(t *testing.T) {
 	t.Parallel()
 

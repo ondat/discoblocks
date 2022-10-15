@@ -103,6 +103,44 @@ func (d *Driver) IsStorageClassValid(sc *storagev1.StorageClass) (bool, error) {
 	return resp, nil
 }
 
+// GetStorageClassAllowedTopology validates StorageClass
+func (d *Driver) GetStorageClassAllowedTopology(node *corev1.Node) ([]corev1.TopologySelectorTerm, error) {
+	rawNode, err := json.Marshal(node)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse StorageClass: %w", err)
+	}
+
+	wasiEnv, instance, err := d.init(map[string]string{
+		"NODE_JSON": string(rawNode),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("unable to init instance: %w", err)
+	}
+
+	getStorageClassAllowedTopology, err := instance.Exports.GetRawFunction("GetStorageClassAllowedTopology")
+	if err != nil {
+		return nil, fmt.Errorf("unable to find GetStorageClassAllowedTopology: %w", err)
+	}
+
+	_, err = getStorageClassAllowedTopology.Native()()
+	if err != nil {
+		return nil, fmt.Errorf("unable to call GetStorageClassAllowedTopology: %w", err)
+	}
+
+	errOut := string(wasiEnv.ReadStderr())
+	if errOut != "" {
+		return nil, fmt.Errorf("function error GetStorageClassAllowedTopology: %s", errOut)
+	}
+
+	terms := []corev1.TopologySelectorTerm{}
+	err = json.Unmarshal(wasiEnv.ReadStdout(), &terms)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse output: %w", err)
+	}
+
+	return terms, nil
+}
+
 // GetPVCStub creates a PersistentVolumeClaim for driver
 func (d *Driver) GetPVCStub(name, namespace, storageClassName string) (*corev1.PersistentVolumeClaim, error) {
 	wasiEnv, instance, err := d.init(map[string]string{
@@ -187,8 +225,15 @@ func (d *Driver) GetCSIDriverDetails() (string, map[string]string, error) {
 }
 
 // GetPreMountCommand returns pre mount command
-func (d *Driver) GetPreMountCommand() (string, error) {
-	wasiEnv, instance, err := d.init(nil)
+func (d *Driver) GetPreMountCommand(pv *corev1.PersistentVolume) (string, error) {
+	rawPV, err := json.Marshal(pv)
+	if err != nil {
+		return "", fmt.Errorf("unable to parse StorageClass: %w", err)
+	}
+
+	wasiEnv, instance, err := d.init(map[string]string{
+		"PERSISTENT_VOLUME_JSON": string(rawPV),
+	})
 	if err != nil {
 		return "", fmt.Errorf("unable to init instance: %w", err)
 	}

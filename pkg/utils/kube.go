@@ -52,44 +52,6 @@ securityContext:
   privileged: false
 `
 
-const attachJobTemplate = `apiVersion: batch/v1
-kind: Job
-metadata:
-  name: "%s"
-  namespace: "%s"
-  labels:
-    app: discoblocks
-spec:
-  template:
-    spec:
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-            - matchFields:
-              - key: metadata.name
-                operator: In
-                values:
-                - "%s"
-      containers:
-      - name: attach
-        image: redhat/ubi8-micro@sha256:4f6f8db9a6dc949d9779a57c43954b251957bd4d019a37edbbde8ed5228fe90a
-        command:
-        - ls
-        - /pvc
-        volumeMounts:
-        - mountPath: /pvc
-          name: attach
-          readOnly: true
-      restartPolicy: Never
-      volumes:
-      - name: attach
-        persistentVolumeClaim:
-          claimName: "%s"
-  backoffLimit: 0
-  ttlSecondsAfterFinished: 86400
-`
-
 const hostJobTemplate = `apiVersion: batch/v1
 kind: Job
 metadata:
@@ -104,7 +66,7 @@ spec:
       nodeName: "%s"
       containers:
       - name: mount
-        image: nixery.dev/shell/gawk/gnugrep/gnused/coreutils-full/cri-tools/docker-client
+        image: nixery.dev/shell/gawk/gnugrep/gnused/coreutils-full/cri-tools/docker-client/nvme-cli
         env:
         - name: MOUNT_POINT
           value: "%s"
@@ -169,7 +131,7 @@ done &&`
 )
 
 const resizeCommandTemplate = `%s
-(:pvc:pvc
+(
 	([ "${FS}" = "ext3" ] && chroot /host nsenter --target 1 --mount resize2fs ${DEV}) ||
 	([ "${FS}" = "ext4" ] && chroot /host nsenter --target 1 --mount resize2fs ${DEV}) ||
 	([ "${FS}" = "xfs" ] && chroot /host nsenter --target 1 --mount xfs_growfs -d ${DEV}) ||
@@ -210,28 +172,6 @@ func RenderMetricsSidecar(privileged bool) (*corev1.Container, error) {
 	return &sidecar, nil
 }
 
-// RenderAttachJob returns the mount job executed on host
-func RenderAttachJob(pvcName, namespace, nodeName string, owner metav1.OwnerReference) (*batchv1.Job, error) {
-	jobName, err := RenderResourceName(true, fmt.Sprintf("%d", time.Now().UnixNano()), pvcName, namespace)
-	if err != nil {
-		return nil, fmt.Errorf("unable to render resource name: %w", err)
-	}
-
-	template := fmt.Sprintf(attachJobTemplate, jobName, namespace, nodeName, pvcName)
-
-	job := batchv1.Job{}
-	if err := yaml.Unmarshal([]byte(template), &job); err != nil {
-		println(template)
-		return nil, fmt.Errorf("unable to unmarshal job: %w", err)
-	}
-
-	job.OwnerReferences = []metav1.OwnerReference{
-		owner,
-	}
-
-	return &job, nil
-}
-
 // RenderMountJob returns the mount job executed on host
 func RenderMountJob(pvcName, pvName, namespace, nodeName, fs, mountPoint string, containerIDs []string, preMountCommand string, hostPID bool, volumeMeta string, owner metav1.OwnerReference) (*batchv1.Job, error) {
 	bindMount := mknodMountTemplate
@@ -267,7 +207,7 @@ func RenderMountJob(pvcName, pvName, namespace, nodeName, fs, mountPoint string,
 }
 
 // RenderResizeJob returns the resize job executed on host
-func RenderResizeJob(pvcName, pvName, namespace, nodeName, fs, preResizeCommand string, volumeMeta string, owner metav1.OwnerReference) (*batchv1.Job, error) {
+func RenderResizeJob(pvcName, pvName, namespace, nodeName, fs, preResizeCommand, volumeMeta string, owner metav1.OwnerReference) (*batchv1.Job, error) {
 	if preResizeCommand != "" {
 		preResizeCommand += " && "
 	}

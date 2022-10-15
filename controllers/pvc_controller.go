@@ -481,21 +481,17 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, paren
 	}
 	logger = logger.WithValues("provisioner", sc.Provisioner)
 
+	logger.Info("Fetch Node...")
+
+	node := &corev1.Node{}
+	if err := r.Client.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
+		logger.Error(err, "Failed to get Node")
+		return
+	}
+
 	driver := drivers.GetDriver(sc.Provisioner)
 	if driver == nil {
 		logger.Error(errors.New("driver not found: "+sc.Provisioner), "Driver not found")
-		return
-	}
-
-	waitForMeta, err := driver.WaitForVolumeAttachmentMeta()
-	if err != nil {
-		logger.Error(err, "Failed to call driver", "method", "WaitForVolumeAttachmentMeta")
-		return
-	}
-
-	preMountCmd, err := driver.GetPreMountCommand()
-	if err != nil {
-		logger.Error(err, "Failed to call GetPreMountCommand")
 		return
 	}
 
@@ -507,6 +503,50 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, paren
 		return
 	}
 	logger = logger.WithValues("pvc_name", pvc.Name)
+
+	scAllowedTopology, err := driver.GetStorageClassAllowedTopology(node)
+	if err != nil {
+		logger.Error(err, "Failed to call driver", "method", "GetStorageClassAllowedTopology")
+		return
+	}
+
+	waitForMeta, err := driver.WaitForVolumeAttachmentMeta()
+	if err != nil {
+		logger.Error(err, "Failed to call driver", "method", "WaitForVolumeAttachmentMeta")
+		return
+	}
+
+	if len(scAllowedTopology) != 0 {
+		topologyItems := ""
+		for _, ti := range scAllowedTopology {
+			topologyItems += ti.String()
+		}
+
+		tmpScName, err := utils.RenderResourceName(true, string(sc.UID), sc.Name, topologyItems)
+		if err != nil {
+			logger.Error(err, "Failed to render RenderResourceName of tmp StorageClass")
+			return
+		}
+
+		topologySC := sc.DeepCopy()
+		topologySC.UID = ""
+		topologySC.ResourceVersion = ""
+		topologySC.Name = tmpScName
+		bm := storagev1.VolumeBindingImmediate
+		topologySC.VolumeBindingMode = &bm
+		topologySC.AllowedTopologies = scAllowedTopology
+
+		logger.Info("Create StorageClass...")
+
+		if err = r.Create(ctx, topologySC); err != nil {
+			if !apierrors.IsAlreadyExists(err) {
+				logger.Error(err, "Failed to create StorageClass")
+				return
+			}
+		}
+
+		pvc.Spec.StorageClassName = &topologySC.Name
+	}
 
 	pvc.Labels["discoblocks-parent"] = parentPVC.Name
 	pvc.Labels["discoblocks-index"] = fmt.Sprintf("%d", nextIndex)
@@ -527,58 +567,23 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, paren
 		return
 	}
 
-	owner := metav1.OwnerReference{
-		APIVersion: parentPVC.APIVersion,
-		Kind:       parentPVC.Kind,
-		Name:       pvc.Name,
-		UID:        pvc.UID,
-	}
-
-	attachJob, err := utils.RenderAttachJob(pvc.Name, pvc.Namespace, nodeName, owner)
-	if err != nil {
-		logger.Error(err, "Unable to render attach job")
-		return
-	}
-
-	logger.Info("Create attach Job...")
-
-	if err := r.Create(ctx, attachJob); err != nil {
-		logger.Error(err, "Failed to create attach job")
-		return
-	}
-
 	waitCtx, cancel := context.WithTimeout(context.Background(), config.Spec.Policy.CoolDown.Duration)
 	defer cancel()
 
-	logger.Info("Wait VolumeAttachment delete...")
+	logger.Info("Wait PersistentVolume...")
 
-WAIT_VA_DELETE:
-	for {
-		select {
-		case <-waitCtx.Done():
-			logger.Error(waitCtx.Err(), "VolumeAttachment creation wait timeout")
-			return
-		default:
-			_, n, err := r.getVolumeAttachment(ctx, pvc.Spec.VolumeName)
-			if err != nil && n != 0 {
-				<-time.NewTimer(time.Second).C
-				continue
-			}
-
-			break WAIT_VA_DELETE
-		}
-	}
-
-	logger.Info("Wait PV...")
-
+	var waitPVErr error
 WAIT_PV:
 	for {
 		select {
 		case <-waitCtx.Done():
-			logger.Error(waitCtx.Err(), "PV creation wait timeout")
+			if waitPVErr == nil {
+				waitPVErr = waitCtx.Err()
+			}
+			logger.Error(waitPVErr, "PV creation wait timeout")
 			return
 		default:
-			if err = r.Get(ctx, types.NamespacedName{Namespace: pvc.Namespace, Name: pvc.Name}, pvc); err == nil &&
+			if waitPVErr = r.Get(ctx, types.NamespacedName{Namespace: pvc.Namespace, Name: pvc.Name}, pvc); waitPVErr == nil &&
 				pvc.Spec.VolumeName != "" {
 				break WAIT_PV
 			}
@@ -595,6 +600,12 @@ WAIT_PV:
 		return
 	} else if pv.Spec.CSI == nil {
 		logger.Error(err, "Failed to find pv.spec.csi")
+		return
+	}
+
+	preMountCmd, err := driver.GetPreMountCommand(pv)
+	if err != nil {
+		logger.Error(err, "Failed to call GetPreMountCommand")
 		return
 	}
 
@@ -632,20 +643,24 @@ WAIT_PV:
 		return
 	}
 
-	logger.Info("Wait VolumeAttachment...", "waitForMeta", waitForMeta)
-
 	volumeMeta := ""
 	if waitForMeta != "" {
-		logger.Info("Wait VolumeAttachment...")
+		logger.Info("Wait VolumeAttachment...", "waitForMeta", waitForMeta)
 
+		var waitVAErr error
 	WAIT_VA:
 		for {
 			select {
 			case <-waitCtx.Done():
-				logger.Error(waitCtx.Err(), "VolumeAttachment creation wait timeout")
+				if waitVAErr == nil {
+					waitVAErr = waitCtx.Err()
+				}
+				logger.Error(waitVAErr, "VolumeAttachment wait timeout")
 				return
 			default:
-				if err := r.Client.Get(ctx, types.NamespacedName{Name: vaName}, volumeAttachment); err != nil ||
+				volumeAttachment, waitVAErr = r.getVolumeAttachment(ctx, pvc.Spec.VolumeName)
+				if err != nil ||
+					volumeAttachment == nil ||
 					!volumeAttachment.Status.Attached ||
 					volumeAttachment.Status.AttachmentMetadata[waitForMeta] == "" {
 					<-time.NewTimer(time.Second).C
@@ -654,6 +669,8 @@ WAIT_PV:
 
 				volumeMeta = volumeAttachment.Status.AttachmentMetadata[waitForMeta]
 
+				logger.Info("VolumeAttachment meta has found", "waitForMeta", waitForMeta, "value", volumeMeta)
+
 				break WAIT_VA
 			}
 		}
@@ -661,7 +678,12 @@ WAIT_PV:
 
 	mountpoint := utils.RenderMountPoint(config.Spec.MountPointPattern, config.Name, nextIndex)
 
-	mountJob, err := utils.RenderMountJob(pvc.Name, pvc.Spec.VolumeName, pvc.Namespace, nodeName, pv.Spec.CSI.FSType, mountpoint, containerIDs, preMountCmd, hostPID, volumeMeta, owner)
+	mountJob, err := utils.RenderMountJob(pvc.Name, pvc.Spec.VolumeName, pvc.Namespace, nodeName, pv.Spec.CSI.FSType, mountpoint, containerIDs, preMountCmd, hostPID, volumeMeta, metav1.OwnerReference{
+		APIVersion: parentPVC.APIVersion,
+		Kind:       parentPVC.Kind,
+		Name:       pvc.Name,
+		UID:        pvc.UID,
+	})
 	if err != nil {
 		logger.Error(err, "Unable to render mount job")
 		return
@@ -745,7 +767,7 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 	if waitForMeta != "" {
 		logger.Info("Fetch VolumeAttachment...")
 
-		volumeAttachment, _, err := r.getVolumeAttachment(ctx, pvc.Spec.VolumeName)
+		volumeAttachment, err := r.getVolumeAttachment(ctx, pvc.Spec.VolumeName)
 		if err != nil {
 			logger.Error(err, "Failed to fetch VolumeAttachment")
 			return
@@ -779,28 +801,28 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 	}
 }
 
-func (r *PVCReconciler) getVolumeAttachment(ctx context.Context, volumeName string) (*storagev1.VolumeAttachment, int, error) {
+func (r *PVCReconciler) getVolumeAttachment(ctx context.Context, volumeName string) (*storagev1.VolumeAttachment, error) {
 	volumeAttachments := &storagev1.VolumeAttachmentList{}
 	if err := r.List(ctx, volumeAttachments, &client.ListOptions{
 		FieldSelector: client.MatchingFieldsSelector{
 			Selector: fields.OneTermEqualSelector("spec.source.persistentVolumeName", volumeName),
 		},
 	}); err != nil {
-		return nil, -1, err
+		return nil, err
 	}
 
 	switch {
 	case len(volumeAttachments.Items) == 0:
-		return nil, 0, errors.New("failed to find VolumeAttachment")
+		return nil, errors.New("failed to find VolumeAttachment")
 	case len(volumeAttachments.Items) > 1:
-		return nil, len(volumeAttachments.Items), errors.New("more than one VolumeAttachment attached to PersistentVolume")
+		return nil, errors.New("more than one VolumeAttachment attached to PersistentVolume")
 	}
 
 	sort.Slice(volumeAttachments.Items, func(i, j int) bool {
 		return volumeAttachments.Items[i].CreationTimestamp.UnixNano() < volumeAttachments.Items[j].CreationTimestamp.UnixNano()
 	})
 
-	return &volumeAttachments.Items[0], 1, nil
+	return &volumeAttachments.Items[0], nil
 }
 
 type pvcEventFilter struct {
