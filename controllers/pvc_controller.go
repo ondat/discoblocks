@@ -395,8 +395,7 @@ func (r *PVCReconciler) MonitorVolumes() {
 					for _, m := range mf["node_filesystem_avail_bytes"].Metric {
 						for _, l := range m.Label {
 							if l.Name == nil || l.Value == nil || *l.Name != "mountpoint" ||
-								(!strings.HasSuffix(*l.Value, fmt.Sprintf("pv/%s/globalmount", lastPVC.Spec.VolumeName)) &&
-									utils.GetMountPointIndex(cached.config.Spec.MountPointPattern, cached.config.Name, *l.Value) != actIndex) {
+								utils.GetMountPointIndex(cached.config.Spec.MountPointPattern, cached.config.Name, *l.Value) != actIndex {
 								continue
 							}
 
@@ -469,7 +468,7 @@ func (r *PVCReconciler) MonitorVolumes() {
 
 					r.InProgress.Store(cached.config.Name, time.Now())
 
-					go r.createPVC(&cached.config, pvcFamily[0], containerIDs, nodeName, pod.Spec.HostPID, nextIndex, logger)
+					go r.createPVC(&cached.config, pvcFamily[0], containerIDs, nodeName, nextIndex, logger)
 
 					continue
 				}
@@ -484,7 +483,7 @@ func (r *PVCReconciler) MonitorVolumes() {
 	}
 }
 
-func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, parentPVC *corev1.PersistentVolumeClaim, containerIDs []string, nodeName string, hostPID bool, nextIndex int, logger logr.Logger) {
+func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, parentPVC *corev1.PersistentVolumeClaim, containerIDs []string, nodeName string, nextIndex int, logger logr.Logger) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
@@ -711,7 +710,7 @@ WAIT_CSI:
 
 	mountpoint := utils.RenderMountPoint(config.Spec.MountPointPattern, config.Name, nextIndex)
 
-	mountJob, err := utils.RenderMountJob(pvc.Name, pvc.Spec.VolumeName, pvc.Namespace, nodeName, pv.Spec.CSI.FSType, mountpoint, containerIDs, preMountCmd, hostPID, volumeMeta, metav1.OwnerReference{
+	mountJob, err := utils.RenderMountJob(pvc.Name, pvc.Spec.VolumeName, pvc.Namespace, nodeName, pv.Spec.CSI.FSType, mountpoint, containerIDs, preMountCmd, volumeMeta, metav1.OwnerReference{
 		APIVersion: parentPVC.APIVersion,
 		Kind:       parentPVC.Kind,
 		Name:       pvc.Name,
