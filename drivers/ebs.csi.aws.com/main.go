@@ -29,14 +29,15 @@ func GetStorageClassAllowedTopology() {
 
 	zone := fastjson.GetString(json, "metadata", "labels", "topology.kubernetes.io/zone")
 	if zone == "" {
-		fmt.Fprint(os.Stderr, "metadata.labels.topology.kubernetes.io/zone not found")
+		fmt.Fprint(os.Stderr, "metadata.labels.'topology.kubernetes.io/zone' not found")
+		return
 	}
 
 	fmt.Fprintf(os.Stdout, `[{
 	"matchLabelExpressions": [
 		{
 			"key": "topology.kubernetes.io/zone",
-			"value": [ "%s" ]
+			"values": [ "%s" ]
 		}
 	]
 }]`, zone)
@@ -75,14 +76,23 @@ func GetPreMountCommand() {
 	volumeHandle := strings.ReplaceAll(fastjson.GetString(json, "spec", "csi", "volumeHandle"), "-", "")
 	if volumeHandle == "" {
 		fmt.Fprint(os.Stderr, "spec.csi.volumeHandle not found")
+		return
 	}
 
-	fmt.Fprintf(os.Stdout, `DEV=$(nvme list | grep %s | awk '{print $1}') && chroot /host nsenter --target 1 --mount mkfs.${FS} ${DEV}`, volumeHandle)
+	fmt.Fprintf(os.Stdout, `DEV=$(nvme list | grep %s | awk '{print $1}') && (chroot /host nsenter --target 1 --mount mkfs.${FS} ${DEV} ||:)`, volumeHandle)
 }
 
 //export GetPreResizeCommand
 func GetPreResizeCommand() {
-	GetPreMountCommand()
+	json := []byte(os.Getenv("PERSISTENT_VOLUME_JSON"))
+
+	volumeHandle := strings.ReplaceAll(fastjson.GetString(json, "spec", "csi", "volumeHandle"), "-", "")
+	if volumeHandle == "" {
+		fmt.Fprint(os.Stderr, "spec.csi.volumeHandle not found")
+		return
+	}
+
+	fmt.Fprintf(os.Stdout, `DEV=$(nvme list | grep %s | awk '{print $1}')`, volumeHandle)
 }
 
 //export IsFileSystemManaged

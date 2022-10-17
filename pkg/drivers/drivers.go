@@ -107,7 +107,7 @@ func (d *Driver) IsStorageClassValid(sc *storagev1.StorageClass) (bool, error) {
 func (d *Driver) GetStorageClassAllowedTopology(node *corev1.Node) ([]corev1.TopologySelectorTerm, error) {
 	rawNode, err := json.Marshal(node)
 	if err != nil {
-		return nil, fmt.Errorf("unable to parse StorageClass: %w", err)
+		return nil, fmt.Errorf("unable to parse Node: %w", err)
 	}
 
 	wasiEnv, instance, err := d.init(map[string]string{
@@ -225,14 +225,20 @@ func (d *Driver) GetCSIDriverDetails() (string, map[string]string, error) {
 }
 
 // GetPreMountCommand returns pre mount command
-func (d *Driver) GetPreMountCommand(pv *corev1.PersistentVolume) (string, error) {
+func (d *Driver) GetPreMountCommand(pv *corev1.PersistentVolume, va *storagev1.VolumeAttachment) (string, error) {
 	rawPV, err := json.Marshal(pv)
 	if err != nil {
-		return "", fmt.Errorf("unable to parse StorageClass: %w", err)
+		return "", fmt.Errorf("unable to parse PersistentVolume: %w", err)
+	}
+
+	rawVA, err := json.Marshal(va)
+	if err != nil {
+		return "", fmt.Errorf("unable to parse VolumeAttachment: %w", err)
 	}
 
 	wasiEnv, instance, err := d.init(map[string]string{
 		"PERSISTENT_VOLUME_JSON": string(rawPV),
+		"VOLUME_ATTACHMENT_JSON": string(rawVA),
 	})
 	if err != nil {
 		return "", fmt.Errorf("unable to init instance: %w", err)
@@ -257,8 +263,24 @@ func (d *Driver) GetPreMountCommand(pv *corev1.PersistentVolume) (string, error)
 }
 
 // GetPreResizeCommand returns pre resize command
-func (d *Driver) GetPreResizeCommand() (string, error) {
-	wasiEnv, instance, err := d.init(nil)
+func (d *Driver) GetPreResizeCommand(pv *corev1.PersistentVolume, va *storagev1.VolumeAttachment) (string, error) {
+	rawPV, err := json.Marshal(pv)
+	if err != nil {
+		return "", fmt.Errorf("unable to parse PersistentVolume: %w", err)
+	}
+
+	rawVA := []byte{}
+	if va != nil {
+		rawVA, err = json.Marshal(va)
+		if err != nil {
+			return "", fmt.Errorf("unable to parse VolumeAttachment: %w", err)
+		}
+	}
+
+	wasiEnv, instance, err := d.init(map[string]string{
+		"PERSISTENT_VOLUME_JSON": string(rawPV),
+		"VOLUME_ATTACHMENT_JSON": string(rawVA),
+	})
 	if err != nil {
 		return "", fmt.Errorf("unable to init instance: %w", err)
 	}
