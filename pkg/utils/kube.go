@@ -122,12 +122,13 @@ echo ok`
 DEV_MINOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV} | awk '{print $3}'  | awk '{split($0,a,":"); print a[2]}') &&
 for CONTAINER_ID in ${CONTAINER_IDS}; do
 	PID=$(docker inspect -f '{{.State.Pid}}' ${CONTAINER_ID} || crictl inspect --output go-template --template '{{.info.pid}}' ${CONTAINER_ID}) &&
-	chroot /host nsenter --target ${PID} --mount mkdir -p /dev ${MOUNT_POINT} &&
+	chroot /host nsenter --target ${PID} --mount mkdir -p $(dirname ${DEV}) ${MOUNT_POINT} &&
 	chroot /host nsenter --target ${PID} --pid --mount mknod ${DEV} b ${DEV_MAJOR} ${DEV_MINOR} &&
 	chroot /host nsenter --target ${PID} --mount mount ${DEV} ${MOUNT_POINT}
 done &&`
 
-	bindMountTemplate = `chroot /host nsenter --target ${PID} --mount mount -o bind /var/lib/kubelet/plugins/kubernetes.io/csi/pv/${PV_NAME}/globalmount ${MOUNT_POINT} &&`
+	bindMountTemplate = `chroot /host nsenter --target 1 --mount mkdir -p ${MOUNT_POINT} &&
+chroot /host nsenter --target 1 --mount mount -o bind /var/lib/kubelet/plugins/kubernetes.io/csi/pv/${PV_NAME}/globalmount ${MOUNT_POINT} &&`
 )
 
 const resizeCommandTemplate = `%s
@@ -137,8 +138,7 @@ const resizeCommandTemplate = `%s
 	([ "${FS}" = "xfs" ] && chroot /host nsenter --target 1 --mount xfs_growfs -d ${DEV}) ||
 	([ "${FS}" = "btrfs" ] && chroot /host nsenter --target 1 --mount btrfs filesystem resize max ${DEV}) ||
 	echo unsupported file-system $FS
-) &&
-echo ok`
+)`
 
 // RenderMetricsService returns the metrics service
 func RenderMetricsService(name, namespace string) (*corev1.Service, error) {
