@@ -127,6 +127,8 @@ func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 }
 
 func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, configNamespace string, logger logr.Logger) (ctrl.Result, error) {
+	nsFinalizer := utils.RenderFinalizer(configName, configNamespace)
+
 	logger.Info("Fetch StrorageClasses...")
 
 	scList := storagev1.StorageClassList{}
@@ -134,21 +136,40 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 		return ctrl.Result{}, fmt.Errorf("unable to list StorageClasses: %w", err)
 	}
 
-	scFinalizer := utils.RenderFinalizer(configName, configNamespace)
-
 	for i := range scList.Items {
-		if scList.Items[i].DeletionTimestamp != nil || !controllerutil.ContainsFinalizer(&scList.Items[i], scFinalizer) {
+		if !controllerutil.ContainsFinalizer(&scList.Items[i], nsFinalizer) {
 			continue
 		}
 
-		controllerutil.RemoveFinalizer(&scList.Items[i], scFinalizer)
+		controllerutil.RemoveFinalizer(&scList.Items[i], nsFinalizer)
 
 		logger := logger.WithValues("sc_name", scList.Items[i].Name)
-		logger.Info("Remove StorageClass finalizer...", "finalizer", scFinalizer)
+		logger.Info("Remove StorageClass finalizer...", "finalizer", nsFinalizer)
 
 		if err := r.Client.Update(ctx, &scList.Items[i]); err != nil {
 			logger.Info("Failed to remove finalizer of StorageClass", "error", err.Error())
 			return ctrl.Result{}, fmt.Errorf("unable to remove finalizer of StorageClass: %w", err)
+		}
+	}
+
+	vaList := storagev1.VolumeAttachmentList{}
+	if err := r.Client.List(ctx, &vaList); err != nil {
+		return ctrl.Result{}, fmt.Errorf("unable to list VolumeAttachmentList: %w", err)
+	}
+
+	for i := range vaList.Items {
+		if !controllerutil.ContainsFinalizer(&vaList.Items[i], nsFinalizer) {
+			continue
+		}
+
+		controllerutil.RemoveFinalizer(&vaList.Items[i], nsFinalizer)
+
+		logger := logger.WithValues("sc_name", vaList.Items[i].Name)
+		logger.Info("Remove VolumeAttachmentList finalizer...", "finalizer", nsFinalizer)
+
+		if err := r.Client.Update(ctx, &vaList.Items[i]); err != nil {
+			logger.Info("Failed to remove finalizer of VolumeAttachmentList", "error", err.Error())
+			return ctrl.Result{}, fmt.Errorf("unable to remove finalizer of VolumeAttachmentList: %w", err)
 		}
 	}
 
