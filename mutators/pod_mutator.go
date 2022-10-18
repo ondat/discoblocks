@@ -134,7 +134,9 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 				var err error
 				pod.Name, err = utils.RenderResourceName(false, nameParts...)
 				if err != nil {
-					return errorMode(http.StatusInternalServerError, "Unable to render resource name: "+err.Error(), fmt.Errorf("unable to render resource name: %w", err))
+					msg := fmt.Sprintf("Unable to render resource name: %s", err.Error())
+					logger.Info(msg)
+					return errorMode(http.StatusInternalServerError, msg, fmt.Errorf("unable to render resource name: %w", err))
 				}
 			}
 		}
@@ -160,8 +162,9 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 		driver := drivers.GetDriver(sc.Provisioner)
 		if driver == nil {
-			logger.Info("Driver not found")
-			return errorMode(http.StatusInternalServerError, "Driver not found: "+sc.Provisioner, fmt.Errorf("driver not found: %s", sc.Provisioner))
+			msg := fmt.Sprintf("Driver not found: %s", sc.Provisioner)
+			logger.Info(msg)
+			return errorMode(http.StatusInternalServerError, msg, fmt.Errorf("driver not found: %s", sc.Provisioner))
 		}
 
 		logger.Info("Attach volume to workload...")
@@ -171,7 +174,9 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		var pvc *corev1.PersistentVolumeClaim
 		pvc, err := utils.NewPVC(&config, prefix, driver)
 		if err != nil {
-			return admission.Errored(http.StatusInternalServerError, err)
+			msg := fmt.Sprintf("Failed to get NewPVC: %s", err.Error())
+			logger.Error(err, msg)
+			return errorMode(http.StatusInternalServerError, msg, fmt.Errorf("failed to get NewPVC: %s", err.Error()))
 		}
 		logger = logger.WithValues("pvc_name", pvc.Name)
 
@@ -180,6 +185,41 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		}
 
 		if req.DryRun == nil || !*req.DryRun {
+			if nodeName != "" {
+				logger.Info("Fetch Node...")
+
+				node := &corev1.Node{}
+				if err := a.Client.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
+					return admission.Errored(http.StatusInternalServerError, err)
+				}
+
+				scAllowedTopology, err := driver.GetStorageClassAllowedTopology(node)
+				if err != nil {
+					msg := fmt.Sprintf("Failed to get GetStorageClassAllowedTopology: %s", err.Error())
+					logger.Info(msg)
+					return errorMode(http.StatusInternalServerError, msg, fmt.Errorf("failed to get GetStorageClassAllowedTopology: %s", err.Error()))
+				}
+
+				if len(scAllowedTopology) != 0 {
+					topologySC, err := utils.NewStorageClass(&sc, scAllowedTopology)
+					if err != nil {
+						msg := fmt.Sprintf("Failed to get NewStorageClass: %s", err.Error())
+						logger.Error(err, msg)
+						return errorMode(http.StatusInternalServerError, msg, fmt.Errorf("failed to get NewStorageClass: %s", err.Error()))
+					}
+
+					logger.Info("Create StorageClass...")
+
+					if err = a.Client.Create(ctx, topologySC); err != nil {
+						if !apierrors.IsAlreadyExists(err) {
+							return admission.Errored(http.StatusInternalServerError, err)
+						}
+					}
+
+					pvc.Spec.StorageClassName = &topologySC.Name
+				}
+			}
+
 			logger.Info("Create PVC...")
 
 			if err = a.Client.Create(ctx, pvc); err != nil {
@@ -193,8 +233,9 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 				if config.Spec.AvailabilityMode != discoblocksondatiov1.ReadWriteOnce {
 					label, err := labels.NewRequirement("discoblocks-parent", selection.Equals, []string{pvc.Name})
 					if err != nil {
-						logger.Error(err, "Unable to parse PVC label selector")
-						return errorMode(http.StatusInternalServerError, "Unable to parse PVC label selectors: discoblocks-parent="+pvc.Name, fmt.Errorf("unable to parse PVC label selectors: %w", err))
+						msg := fmt.Sprintf("Unable to parse PVC label selectors: discoblocks-parent=%s", pvc.Name)
+						logger.Error(err, msg)
+						return errorMode(http.StatusInternalServerError, msg, fmt.Errorf("unable to parse PVC label selectors: %w", err))
 					}
 					pvcSelector := labels.NewSelector().Add(*label)
 
@@ -226,8 +267,9 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 						index, err := strconv.Atoi(pvcs.Items[i].Labels["discoblocks-index"])
 						if err != nil {
-							logger.Error(err, "Unable to convert index")
-							return errorMode(http.StatusInternalServerError, "Unable to convert index: "+pvcs.Items[i].Labels["discoblocks-index"], fmt.Errorf("unable to convert index: %w", err))
+							msg := fmt.Sprintf("Unable to convert index: %s", pvcs.Items[i].Labels["discoblocks-index"])
+							logger.Error(err, msg)
+							return errorMode(http.StatusInternalServerError, msg, fmt.Errorf("unable to convert index: %w", err))
 						}
 
 						pvcNamesWithMount[pvcs.Items[i].Name] = utils.RenderMountPoint(config.Spec.MountPointPattern, pvcs.Items[i].Name, index)

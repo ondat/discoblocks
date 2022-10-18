@@ -11,6 +11,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 )
@@ -107,7 +108,7 @@ spec:
        - hostPath:
           path: /
          name: host
-  backoffLimit: 3
+  backoffLimit: 0
   ttlSecondsAfterFinished: 86400
 `
 
@@ -255,6 +256,29 @@ func NewPVC(config *discoblocksondatiov1.DiskConfig, prefix string, driver *driv
 	}
 
 	return pvc, nil
+}
+
+// NewStorageClass constructs a new StorageClass
+func NewStorageClass(sc *storagev1.StorageClass, scAllowedTopology []corev1.TopologySelectorTerm) (*storagev1.StorageClass, error) {
+	topologyItems := ""
+	for _, ti := range scAllowedTopology {
+		topologyItems += ti.String()
+	}
+
+	tmpScName, err := RenderResourceName(true, string(sc.UID), sc.Name, topologyItems)
+	if err != nil {
+		return nil, fmt.Errorf("failed to render RenderResourceName of tmp StorageClass: %w", err)
+	}
+
+	topologySC := sc.DeepCopy()
+	topologySC.UID = ""
+	topologySC.ResourceVersion = ""
+	topologySC.Name = tmpScName
+	bm := storagev1.VolumeBindingImmediate
+	topologySC.VolumeBindingMode = &bm
+	topologySC.AllowedTopologies = scAllowedTopology
+
+	return topologySC, nil
 }
 
 // IsOwnedByDaemonSet detects is parent DaemonSet

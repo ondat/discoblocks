@@ -297,16 +297,16 @@ func (r *PVCReconciler) MonitorVolumes() {
 				continue
 			}
 
-			label, err := labels.NewRequirement("discoblocks", selection.Equals, []string{cached.config.Name})
-			if err != nil {
-				logger.Error(err, "Unable to parse PVC label selector")
-				continue
-			}
-			pvcSelector := labels.NewSelector().Add(*label)
-
-			logger.Info("Fetch PVCs...")
-
 			if cached.pvcs == nil {
+				label, err := labels.NewRequirement("discoblocks", selection.Equals, []string{cached.config.Name})
+				if err != nil {
+					logger.Error(err, "Unable to parse PVC label selector")
+					continue
+				}
+				pvcSelector := labels.NewSelector().Add(*label)
+
+				logger.Info("Fetch PVCs...")
+
 				pvcs := corev1.PersistentVolumeClaimList{}
 				if err = r.Client.List(ctx, &pvcs, &client.ListOptions{
 					Namespace:     cached.config.Namespace,
@@ -381,7 +381,7 @@ func (r *PVCReconciler) MonitorVolumes() {
 					}
 				}
 
-				logger = logger.WithValues("last_pvc", lastPVC.Name)
+				logger = logger.WithValues("last_pvc", lastPVC.Name, "last_pv", lastPVC.Spec.VolumeName)
 
 				lastDiskMetrics := ""
 				for _, metric := range metrics[podName] {
@@ -395,7 +395,8 @@ func (r *PVCReconciler) MonitorVolumes() {
 					for _, m := range mf["node_filesystem_avail_bytes"].Metric {
 						for _, l := range m.Label {
 							if l.Name == nil || l.Value == nil || *l.Name != "mountpoint" ||
-								utils.GetMountPointIndex(cached.config.Spec.MountPointPattern, cached.config.Name, *l.Value) != actIndex {
+								(utils.GetMountPointIndex(cached.config.Spec.MountPointPattern, cached.config.Name, *l.Value) != actIndex &&
+									!strings.HasSuffix(*l.Value, fmt.Sprintf("pv/%s/globalmount", lastPVC.Spec.VolumeName))) {
 								continue
 							}
 
@@ -536,24 +537,11 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, paren
 	}
 
 	if len(scAllowedTopology) != 0 {
-		topologyItems := ""
-		for _, ti := range scAllowedTopology {
-			topologyItems += ti.String()
-		}
-
-		tmpScName, err := utils.RenderResourceName(true, string(sc.UID), sc.Name, topologyItems)
+		topologySC, err := utils.NewStorageClass(&sc, scAllowedTopology)
 		if err != nil {
-			logger.Error(err, "Failed to render RenderResourceName of tmp StorageClass")
+			logger.Error(err, "Failed to render get NewStorageClass")
 			return
 		}
-
-		topologySC := sc.DeepCopy()
-		topologySC.UID = ""
-		topologySC.ResourceVersion = ""
-		topologySC.Name = tmpScName
-		bm := storagev1.VolumeBindingImmediate
-		topologySC.VolumeBindingMode = &bm
-		topologySC.AllowedTopologies = scAllowedTopology
 
 		logger.Info("Create StorageClass...")
 
@@ -652,6 +640,7 @@ WAIT_CSI:
 					UID:        pv.UID,
 				},
 			},
+			Finalizers: []string{utils.RenderFinalizer(config.Name, config.Namespace)},
 		},
 		Spec: storagev1.VolumeAttachmentSpec{
 			Attacher: sc.Provisioner,
