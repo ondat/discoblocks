@@ -79,7 +79,9 @@ func GetPreMountCommand() {
 		return
 	}
 
-	fmt.Fprintf(os.Stdout, `DEV=$(nvme list | grep %s | awk '{print $1}') && (chroot /host nsenter --target 1 --mount mkfs.${FS} ${DEV} ||:)`, volumeHandle)
+	fmt.Fprintf(os.Stdout, `DEV=$(nvme list | grep %s | awk '{print $1}') &&
+(chroot /host nsenter --target 1 --mount mkfs.${FS} ${DEV} ||:)`,
+		volumeHandle)
 }
 
 //export GetPreResizeCommand
@@ -92,7 +94,11 @@ func GetPreResizeCommand() {
 		return
 	}
 
-	fmt.Fprintf(os.Stdout, `DEV=$(nvme list | grep %s | awk '{print $1}')`, volumeHandle)
+	fmt.Fprintf(os.Stdout, `DEV=$(nvme list | grep %s | awk '{print $1}') &&
+chroot /host nsenter --target 1 --mount mkdir -p /tmp/discoblocks${DEV} &&
+chroot /host nsenter --target 1 --mount mount ${DEV} /tmp/discoblocks${DEV} &&
+trap "chroot /host nsenter --target 1 --mount umount /tmp/discoblocks${DEV}" EXIT`,
+		volumeHandle)
 }
 
 //export IsFileSystemManaged

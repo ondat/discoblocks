@@ -112,11 +112,8 @@ spec:
 
 const (
 	mountCommandTemplate = `%s
-: ${DEV?= required} &&
-chroot /host nsenter --target 1 --mount mkdir -p /var/lib/kubelet/plugins/kubernetes.io/csi/pv/${PV_NAME}/globalmount &&
-chroot /host nsenter --target 1 --mount mount ${DEV} /var/lib/kubelet/plugins/kubernetes.io/csi/pv/${PV_NAME}/globalmount &&
-DEV_MAJOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV} | awk '{print $3}'  | awk '{split($0,a,":"); print a[1]}') &&
-DEV_MINOR=$(chroot /host nsenter --target 1 --mount cat /proc/self/mountinfo | grep ${DEV} | awk '{print $3}'  | awk '{split($0,a,":"); print a[2]}') &&
+DEV_MAJOR=$(chroot /host nsenter --target 1 --mount lsblk -lp | grep ${DEV} | awk '{print $2}'  | awk '{split($0,a,":"); print a[1]}') &&
+DEV_MINOR=$(chroot /host nsenter --target 1 --mount lsblk -lp | grep ${DEV} | awk '{print $2}'  | awk '{split($0,a,":"); print a[2]}') &&
 for CONTAINER_ID in ${CONTAINER_IDS}; do
 	PID=$(docker inspect -f '{{.State.Pid}}' ${CONTAINER_ID} || crictl inspect --output go-template --template '{{.info.pid}}' ${CONTAINER_ID}) &&
 	chroot /host nsenter --target ${PID} --mount mkdir -p $(dirname ${DEV}) ${MOUNT_POINT} &&
