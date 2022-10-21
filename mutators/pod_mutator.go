@@ -144,8 +144,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		if pod.Labels == nil {
 			pod.Labels = map[string]string{}
 		}
-		pod.Labels[utils.RenderUniqueLabel(config.Name)] = config.Name
-		pod.Labels["discoblocks-metrics"] = pod.Name
+		pod.Labels[utils.RenderUniqueLabel(string(config.UID))] = config.Name
 
 		logger.Info("Fetch StorageClass...")
 
@@ -309,7 +308,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 	logger.Info("Attach sidecar...")
 
-	metricsSideCar, err := utils.RenderMetricsSidecar(pod.Spec.HostPID)
+	metricsSideCar, err := utils.RenderMetricsSidecar()
 	if err != nil {
 		logger.Error(err, "Metrics sidecar template invalid")
 		return admission.Allowed("Metrics sidecar template invalid")

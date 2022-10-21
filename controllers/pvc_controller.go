@@ -20,8 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,6 +47,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
+
+const monitoringPeriod = time.Minute / 2
 
 type nodeCache interface {
 	GetNodesByIP() map[string]string
@@ -147,344 +147,238 @@ func (r *PVCReconciler) MonitorVolumes() {
 	logger.Info("Monitor Volumes...")
 	defer logger.Info("Monitor done")
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute-time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), monitoringPeriod)
 	defer cancel()
 
-	label, err := labels.NewRequirement("discoblocks", selection.Exists, nil)
-	if err != nil {
-		logger.Error(err, "Unable to parse Service label selector")
-		return
-	}
-	endpointSelector := labels.NewSelector().Add(*label)
+	logger.Info("Fetch DiskConfigs...")
 
-	logger.Info("Fetch Endpoints...")
-
-	endpoints := corev1.EndpointsList{}
-	if err := r.Client.List(ctx, &endpoints, &client.ListOptions{
-		LabelSelector: endpointSelector,
-	}); err != nil {
-		logger.Error(err, "Unable to fetch Services")
+	diskConfigs := discoblocksondatiov1.DiskConfigList{}
+	if err := r.Client.List(ctx, &diskConfigs); err != nil {
+		logger.Error(err, "Unable to fetch DiskConfigs")
 		return
 	}
 
-	diskConfigCache := map[types.NamespacedName]struct {
-		config discoblocksondatiov1.DiskConfig
-		pvcs   []*corev1.PersistentVolumeClaim
-	}{}
+	for d := range diskConfigs.Items {
+		config := diskConfigs.Items[d]
 
-	discoblocks := map[types.NamespacedName][]string{}
-	metrics := map[types.NamespacedName][]string{}
-	for i := range endpoints.Items {
-		if endpoints.Items[i].DeletionTimestamp != nil {
+		if config.Spec.Policy.Pause {
+			logger.Info("Autoscaling paused")
 			continue
 		}
 
-		for _, ss := range endpoints.Items[i].Subsets {
-			for _, ip := range ss.Addresses {
-				podName := types.NamespacedName{Namespace: ip.TargetRef.Namespace, Name: ip.TargetRef.Name}
-
-				if _, ok := discoblocks[podName]; !ok {
-					discoblocks[podName] = []string{}
-				}
-				for k, v := range endpoints.Items[i].Labels {
-					if strings.HasPrefix(k, "discoblocks/") {
-						discoblocks[podName] = append(discoblocks[podName], v)
-					}
-				}
-
-				logger := logger.WithValues("pod_name", podName.String(), "ep_name", endpoints.Items[i].Name, "IP", ip.IP)
-
-				req, err := http.NewRequest("GET", fmt.Sprintf("http://%s:9100/metrics", ip.IP), http.NoBody)
-				if err != nil {
-					logger.Error(err, "Request error")
-					continue
-				}
-
-				const div = 4
-				callCtx, cancel := context.WithTimeout(ctx, time.Minute/div)
-
-				logger.Info("Call Endpoint...")
-
-				resp, err := http.DefaultClient.Do(req.WithContext(callCtx))
-				if err != nil {
-					cancel()
-					logger.Error(err, "Connection error")
-					continue
-				}
-				cancel()
-
-				rawBody, err := io.ReadAll(resp.Body)
-				if err != nil {
-					logger.Error(err, "Body read error")
-					continue
-				}
-				if err = resp.Body.Close(); err != nil {
-					logger.Error(err, "Body close error")
-					continue
-				}
-
-				for _, line := range strings.Split(string(rawBody), "\n") {
-					if !strings.HasPrefix(line, "node_filesystem_avail_bytes") {
-						continue
-					}
-
-					mf, err := utils.ParsePrometheusMetric(line)
-					if err != nil {
-						logger.Error(err, "Failed to parse metrics")
-						continue
-					}
-
-					if _, ok := mf["node_filesystem_avail_bytes"]; !ok {
-						logger.Error(err, "Failed to find node_filesystem_avail_bytes", "metric", line)
-						continue
-					}
-
-					if _, ok := metrics[podName]; !ok {
-						metrics[podName] = []string{}
-					}
-					metrics[podName] = append(metrics[podName], line)
-				}
-			}
-		}
-	}
-
-	if len(metrics) == 0 {
-		logger.Info("Metrics data not found")
-		return
-	}
-
-	for podName, diskConfigNames := range discoblocks {
-		logger := logger.WithValues("pod_name", podName.String())
-
-		logger.Info("Fetch Pod...")
-
-		pod := corev1.Pod{}
-		if err := r.Client.Get(ctx, podName, &pod); err != nil {
-			logger.Error(err, "Failed to fetch pod error")
+		last, loaded := r.InProgress.Load(config.Name)
+		if loaded && last.(time.Time).Add(config.Spec.Policy.CoolDown.Duration).After(time.Now()) {
+			logger.Info("Autoscaling cooldown")
 			continue
 		}
 
-		for _, diskConfigName := range diskConfigNames {
-			diskConfigName := types.NamespacedName{Namespace: pod.Namespace, Name: diskConfigName}
+		logger := logger.WithValues("dc_name", config.Name, "dc_namespace", config.Namespace)
 
-			logger := logger.WithValues("dc_name", diskConfigName.String())
+		configLabel, err := labels.NewRequirement("discoblocks", selection.Equals, []string{config.Name})
+		if err != nil {
+			logger.Error(err, "Unable to parse PVC label selector")
+			continue
+		}
+		pvcSelector := labels.NewSelector().Add(*configLabel)
 
-			cached, ok := diskConfigCache[diskConfigName]
-			if !ok {
-				logger.Info("Fetch DiskConfig...")
+		logger.Info("Fetch PVCs...")
 
-				cached = struct {
-					config discoblocksondatiov1.DiskConfig
-					pvcs   []*corev1.PersistentVolumeClaim
-				}{
-					config: discoblocksondatiov1.DiskConfig{},
-				}
-				if err := r.Client.Get(ctx, diskConfigName, &cached.config); err != nil {
-					logger.Error(err, "Failed to fetch DiskConfig error")
-					continue
-				}
-				diskConfigCache[diskConfigName] = cached
-			}
+		pvcs := corev1.PersistentVolumeClaimList{}
+		if err = r.Client.List(ctx, &pvcs, &client.ListOptions{
+			Namespace:     config.Namespace,
+			LabelSelector: pvcSelector,
+		}); err != nil {
+			logger.Error(err, "Unable to fetch PVCs")
+			continue
+		}
 
-			if cached.config.Spec.Policy.Pause {
-				logger.Info("Autoscaling paused")
+		activePVCs := []*corev1.PersistentVolumeClaim{}
+		for i := range pvcs.Items {
+			if pvcs.Items[i].DeletionTimestamp != nil ||
+				!controllerutil.ContainsFinalizer(&pvcs.Items[i], utils.RenderFinalizer(config.Name)) ||
+				pvcs.Items[i].Status.ResizeStatus != nil && *pvcs.Items[i].Status.ResizeStatus != corev1.PersistentVolumeClaimNoExpansionInProgress {
 				continue
 			}
 
-			last, loaded := r.InProgress.Load(cached.config.Name)
-			if loaded && last.(time.Time).Add(cached.config.Spec.Policy.CoolDown.Duration).After(time.Now()) {
-				logger.Info("Autoscaling cooldown")
+			activePVCs = append(activePVCs, &pvcs.Items[i])
+
+			logger.Info("Volume found", "pvc_name", pvcs.Items[i].Name)
+		}
+
+		if len(activePVCs) == 0 {
+			logger.Info("Unable to find any PVC")
+			continue
+		}
+
+		podLabel, err := labels.NewRequirement(utils.RenderUniqueLabel(string(config.UID)), selection.Equals, []string{config.Name})
+		if err != nil {
+			logger.Error(err, "Unable to parse Pod label selector")
+			continue
+		}
+		podSelector := labels.NewSelector().Add(*podLabel)
+
+		logger.Info("Fetch Pods...")
+
+		pods := corev1.PodList{}
+		if err = r.Client.List(ctx, &pods, &client.ListOptions{
+			Namespace:     config.Namespace,
+			LabelSelector: podSelector,
+		}); err != nil {
+			logger.Error(err, "Unable to fetch Pods")
+			continue
+		}
+
+		sem := utils.CreateSemaphore(concurrency, config.Spec.Policy.CoolDown.Duration)
+		wg := sync.WaitGroup{}
+
+		for p := range pods.Items {
+			pod := pods.Items[p]
+
+			if pod.DeletionTimestamp != nil {
 				continue
 			}
 
-			if cached.pvcs == nil {
-				label, err := labels.NewRequirement("discoblocks", selection.Equals, []string{cached.config.Name})
+			wg.Add(1)
+
+			go func() {
+				defer wg.Done()
+
+				unlock, err := utils.WaitForSemaphore(ctx, sem)
 				if err != nil {
-					logger.Error(err, "Unable to parse PVC label selector")
-					continue
+					logger.Info("Context deadline")
+					return
 				}
-				pvcSelector := labels.NewSelector().Add(*label)
+				defer unlock()
 
-				logger.Info("Fetch PVCs...")
+				logger := logger.WithValues("pod_name", pod.Name)
 
-				pvcs := corev1.PersistentVolumeClaimList{}
-				if err = r.Client.List(ctx, &pvcs, &client.ListOptions{
-					Namespace:     cached.config.Namespace,
-					LabelSelector: pvcSelector,
-				}); err != nil {
-					logger.Error(err, "Unable to fetch PVCs")
-					continue
+				logger.Info("Fetch DiskInfo...")
+
+				diskInfo, err := utils.FetchDiskInfo(fmt.Sprintf("%s:9100", pod.Status.PodIP))
+				if err != nil {
+					logger.Error(err, "Unable to fetch disk info")
+					return
 				}
 
-				cached.pvcs = []*corev1.PersistentVolumeClaim{}
-				for i := range pvcs.Items {
-					if pvcs.Items[i].DeletionTimestamp != nil ||
-						!controllerutil.ContainsFinalizer(&pvcs.Items[i], utils.RenderFinalizer(cached.config.Name)) ||
-						pvcs.Items[i].Status.ResizeStatus != nil && *pvcs.Items[i].Status.ResizeStatus != corev1.PersistentVolumeClaimNoExpansionInProgress {
+				podPVCsByParent := map[string][]*corev1.PersistentVolumeClaim{}
+				for i := range pod.Spec.Volumes {
+					if pod.Spec.Volumes[i].PersistentVolumeClaim == nil {
 						continue
 					}
 
-					cached.pvcs = append(cached.pvcs, &pvcs.Items[i])
+					for cp := range activePVCs {
+						if _, ok := activePVCs[cp].Labels["discoblocks-parent"]; !ok &&
+							pod.Spec.Volumes[i].PersistentVolumeClaim.ClaimName == activePVCs[cp].Name {
+							if _, ok := podPVCsByParent[activePVCs[cp].Name]; !ok {
+								podPVCsByParent[activePVCs[cp].Name] = []*corev1.PersistentVolumeClaim{}
+							}
+							podPVCsByParent[activePVCs[cp].Name] = append(podPVCsByParent[activePVCs[cp].Name], activePVCs[cp])
 
-					logger.Info("Volume found", "pvc_name", pvcs.Items[i].Name)
-				}
-			}
-
-			if len(cached.pvcs) == 0 {
-				logger.Error(err, "Unable to find any PVC")
-				continue
-			}
-
-			podPVCsByParent := map[string][]*corev1.PersistentVolumeClaim{}
-			for i := range pod.Spec.Volumes {
-				if pod.Spec.Volumes[i].PersistentVolumeClaim == nil {
-					continue
-				}
-
-				for cp := range cached.pvcs {
-					if _, ok := cached.pvcs[cp].Labels["discoblocks-parent"]; !ok &&
-						pod.Spec.Volumes[i].PersistentVolumeClaim.ClaimName == cached.pvcs[cp].Name {
-						if _, ok := podPVCsByParent[cached.pvcs[cp].Name]; !ok {
-							podPVCsByParent[cached.pvcs[cp].Name] = []*corev1.PersistentVolumeClaim{}
-						}
-						podPVCsByParent[cached.pvcs[cp].Name] = append(podPVCsByParent[cached.pvcs[cp].Name], cached.pvcs[cp])
-
-						for cc := range cached.pvcs {
-							if parent, ok := cached.pvcs[cc].Labels["discoblocks-parent"]; ok && parent == cached.pvcs[cp].Name {
-								podPVCsByParent[cached.pvcs[cp].Name] = append(podPVCsByParent[cached.pvcs[cp].Name], cached.pvcs[cc])
+							for cc := range activePVCs {
+								if parent, ok := activePVCs[cc].Labels["discoblocks-parent"]; ok && parent == activePVCs[cp].Name {
+									podPVCsByParent[activePVCs[cp].Name] = append(podPVCsByParent[activePVCs[cp].Name], activePVCs[cc])
+								}
 							}
 						}
 					}
 				}
-			}
 
-			if len(podPVCsByParent) == 0 {
-				logger.Error(err, "Unable to find any PVC for Pod")
-				continue
-			}
-
-			for _, pvcFamily := range podPVCsByParent {
-				sort.Slice(pvcFamily, func(i, j int) bool {
-					return pvcFamily[i].CreationTimestamp.UnixNano() < pvcFamily[j].CreationTimestamp.UnixNano()
-				})
-
-				const hundred = 100
-
-				lastPVC := pvcFamily[len(pvcFamily)-1]
-
-				actIndex := 0
-				if lastIndex, ok := lastPVC.Labels["discoblocks-index"]; ok {
-					actIndex, err = strconv.Atoi(lastIndex)
-					if err != nil {
-						logger.Error(err, "Unable to convert index")
-						continue
-					}
+				if len(podPVCsByParent) == 0 {
+					logger.Error(err, "Unable to find any PVC for Pod")
+					return
 				}
 
-				logger = logger.WithValues("last_pvc", lastPVC.Name, "last_pv", lastPVC.Spec.VolumeName)
+				for _, pvcFamily := range podPVCsByParent {
+					sort.Slice(pvcFamily, func(i, j int) bool {
+						return pvcFamily[i].CreationTimestamp.UnixNano() < pvcFamily[j].CreationTimestamp.UnixNano()
+					})
 
-				lastDiskMetrics := ""
-				for _, metric := range metrics[podName] {
-					mf, err := utils.ParsePrometheusMetric(metric)
-					if err != nil {
-						logger.Error(err, "Failed to parse metrics")
+					lastPVC := pvcFamily[len(pvcFamily)-1]
+
+					actIndex := 0
+					if lastIndex, ok := lastPVC.Labels["discoblocks-index"]; ok {
+						actIndex, err = strconv.Atoi(lastIndex)
+						if err != nil {
+							logger.Error(err, "Unable to convert index")
+							continue
+						}
+					}
+
+					lastMountPoint := utils.RenderMountPoint(config.Spec.MountPointPattern, config.Name, actIndex)
+
+					logger = logger.WithValues("last_pvc", lastPVC.Name, "last_pv", lastPVC.Spec.VolumeName, "last_mp", lastMountPoint)
+
+					lastUsed, ok := diskInfo[lastMountPoint]
+					if !ok {
+						logger.Error(err, "Unable to find metrics", "disk_info", diskInfo)
 						continue
 					}
 
-				FIND_METRICS:
-					for _, m := range mf["node_filesystem_avail_bytes"].Metric {
-						for _, l := range m.Label {
-							if l.Name == nil || l.Value == nil || *l.Name != "mountpoint" ||
-								(utils.GetMountPointIndex(cached.config.Spec.MountPointPattern, cached.config.Name, *l.Value) != actIndex &&
-									!strings.HasSuffix(*l.Value, fmt.Sprintf("pv/%s/globalmount", lastPVC.Spec.VolumeName))) {
-								continue
+					logger = logger.WithValues("last_used_%", lastUsed)
+
+					if lastUsed < float64(config.Spec.Policy.UpscaleTriggerPercentage) {
+						logger.Info("Disk size ok")
+						continue
+					}
+
+					newCapacity := config.Spec.Policy.ExtendCapacity
+					newCapacity.Add(lastPVC.Spec.Resources.Requests[corev1.ResourceStorage])
+
+					logger = logger.WithValues("new_capacity", newCapacity.String(), "max_capacity", config.Spec.Policy.MaximumCapacityOfDisk.String(), "no_disks", len(pvcFamily), "max_disks", config.Spec.Policy.MaximumNumberOfDisks)
+
+					logger.Info("Find Node name")
+
+					nodeName := r.NodeCache.GetNodesByIP()[pod.Status.HostIP]
+					if nodeName == "" {
+						logger.Error(errors.New("node not found: "+pod.Status.HostIP), "Node not found", "IP", pod.Status.HostIP)
+						continue
+					}
+
+					logger = logger.WithValues("node_name", nodeName)
+
+					if newCapacity.Cmp(config.Spec.Policy.MaximumCapacityOfDisk) == 1 {
+						if config.Spec.Policy.MaximumNumberOfDisks > 0 && len(pvcFamily) >= int(config.Spec.Policy.MaximumNumberOfDisks) {
+							logger.Info("Already maximum number of disks", "number", config.Spec.Policy.MaximumNumberOfDisks)
+							continue
+						}
+
+						logger.Info("New disk needed")
+
+						nextIndex := actIndex + 1
+
+						logger.Info("Next index", "index", nextIndex)
+
+						containerIDs := []string{}
+						for i := range pod.Status.ContainerStatuses {
+							cID := pod.Status.ContainerStatuses[i].ContainerID
+							for _, prefix := range []string{"containerd://", "docker://"} {
+								cID = strings.TrimPrefix(cID, prefix)
 							}
 
-							lastDiskMetrics = metric
-
-							break FIND_METRICS
+							containerIDs = append(containerIDs, cID)
 						}
-					}
-				}
 
-				if lastDiskMetrics == "" {
-					logger.Error(err, "Unable to find metrics")
-					continue
-				}
+						r.InProgress.Store(config.Name, time.Now())
 
-				logger.Info("Last PVC metric", "metric", lastDiskMetrics)
+						go r.createPVC(&config, &pod, pvcFamily[0], containerIDs, nodeName, nextIndex, logger)
 
-				available, err := utils.ParsePrometheusMetricValue(lastDiskMetrics)
-				if err != nil {
-					logger.Error(err, "Metric is invalid")
-					continue
-				}
-
-				actualCapacity := lastPVC.Spec.Resources.Requests[corev1.ResourceStorage]
-				treshold := actualCapacity.AsApproximateFloat64() * float64(cached.config.Spec.Policy.UpscaleTriggerPercentage) / hundred
-
-				logger.Info("Capacities", "actual", fmt.Sprintf("%.2f", actualCapacity.AsApproximateFloat64()), "available", fmt.Sprintf("%.2f", available), "treshold", fmt.Sprintf("%.2f", treshold))
-
-				if available > treshold {
-					logger.Info("Disk size ok")
-					continue
-				}
-
-				newCapacity := cached.config.Spec.Policy.ExtendCapacity
-				newCapacity.Add(actualCapacity)
-
-				logger = logger.WithValues("new_capacity", newCapacity.String(), "max_capacity", cached.config.Spec.Policy.MaximumCapacityOfDisk.String(), "no_disks", len(pvcFamily), "max_disks", cached.config.Spec.Policy.MaximumNumberOfDisks)
-
-				logger.Info("Find Node name")
-
-				nodeName := r.NodeCache.GetNodesByIP()[pod.Status.HostIP]
-				if nodeName == "" {
-					logger.Error(errors.New("node not found: "+pod.Status.HostIP), "Node not found", "IP", pod.Status.HostIP)
-					continue
-				}
-
-				logger = logger.WithValues("node_name", nodeName)
-
-				if newCapacity.Cmp(cached.config.Spec.Policy.MaximumCapacityOfDisk) == 1 {
-					if cached.config.Spec.Policy.MaximumNumberOfDisks > 0 && len(pvcFamily) >= int(cached.config.Spec.Policy.MaximumNumberOfDisks) {
-						logger.Info("Already maximum number of disks", "number", cached.config.Spec.Policy.MaximumNumberOfDisks)
 						continue
 					}
 
-					logger.Info("New disk needed")
+					logger.Info("Resize needed")
 
-					nextIndex := actIndex + 1
+					r.InProgress.Store(config.Name, time.Now())
 
-					logger.Info("Next index", "index", nextIndex)
-
-					containerIDs := []string{}
-					for i := range pod.Status.ContainerStatuses {
-						cID := pod.Status.ContainerStatuses[i].ContainerID
-						for _, prefix := range []string{"containerd://", "docker://"} {
-							cID = strings.TrimPrefix(cID, prefix)
-						}
-
-						containerIDs = append(containerIDs, cID)
-					}
-
-					r.InProgress.Store(cached.config.Name, time.Now())
-
-					go r.createPVC(&cached.config, pvcFamily[0], containerIDs, nodeName, nextIndex, logger)
-
-					continue
+					go r.resizePVC(&config, newCapacity, lastPVC, nodeName, logger)
 				}
-
-				logger.Info("Resize needed")
-
-				r.InProgress.Store(cached.config.Name, time.Now())
-
-				go r.resizePVC(&cached.config, newCapacity, lastPVC, nodeName, logger)
-			}
+			}()
 		}
+
+		wg.Wait()
 	}
 }
 
-func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, parentPVC *corev1.PersistentVolumeClaim, containerIDs []string, nodeName string, nextIndex int, logger logr.Logger) {
+func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, pod *corev1.Pod, parentPVC *corev1.PersistentVolumeClaim, containerIDs []string, nodeName string, nextIndex int, logger logr.Logger) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
@@ -634,13 +528,12 @@ WAIT_CSI:
 			Name: vaName,
 			OwnerReferences: []metav1.OwnerReference{
 				{
-					APIVersion: pv.APIVersion,
-					Kind:       pv.Kind,
-					Name:       pv.Name,
-					UID:        pv.UID,
+					APIVersion: pod.APIVersion,
+					Kind:       pod.Kind,
+					Name:       pod.Name,
+					UID:        pod.UID,
 				},
 			},
-			Finalizers: []string{utils.RenderFinalizer(config.Name, config.Namespace)},
 		},
 		Spec: storagev1.VolumeAttachmentSpec{
 			Attacher: sc.Provisioner,
@@ -897,8 +790,7 @@ func (r *PVCReconciler) SetupWithManager(mgr ctrl.Manager) (chan<- bool, error) 
 	closeChan := make(chan bool)
 
 	go func() {
-		const two = 2
-		ticker := time.NewTicker(time.Minute / two)
+		ticker := time.NewTicker(monitoringPeriod)
 		defer ticker.Stop()
 
 		for {

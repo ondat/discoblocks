@@ -39,16 +39,14 @@ spec:
 `
 
 const metricsTeamplate = `name: discoblocks-metrics
-image: bitnami/node-exporter:1.4.0
+image: nixery.dev/shell/ucspi-tcp/mount
 ports:
 - containerPort: 9100
   protocol: TCP
 command:
-- /opt/bitnami/node-exporter/bin/node_exporter
-- --collector.disable-defaults
-- --collector.filesystem
-- --collector.filesystem.mount-points-exclude="*"
-- --collector.filesystem.fs-types-exclude="^(ext[2-4]|btrfs|xfs)$"
+- bash
+- -c
+- "trap exit SIGTERM ; while true; do tcpserver -v -c 1 -D -P -R -H -t 3 -l 0 0.0.0.0 9100 df & c=$! wait $c; done"
 securityContext:
   privileged: false
 `
@@ -147,22 +145,10 @@ func RenderMetricsService(name, namespace string) (*corev1.Service, error) {
 }
 
 // RenderMetricsSidecar returns the metrics sidecar
-func RenderMetricsSidecar(privileged bool) (*corev1.Container, error) {
+func RenderMetricsSidecar() (*corev1.Container, error) {
 	sidecar := corev1.Container{}
 	if err := yaml.Unmarshal([]byte(metricsTeamplate), &sidecar); err != nil {
 		return nil, fmt.Errorf("unable to unmarshal container: %w", err)
-	}
-
-	sidecar.SecurityContext.Privileged = &privileged
-
-	if privileged {
-		sidecar.VolumeMounts = []corev1.VolumeMount{
-			{
-				Name:      "varlibkubelet",
-				MountPath: "/var/lib/kubelet",
-				ReadOnly:  true,
-			},
-		}
 	}
 
 	return &sidecar, nil

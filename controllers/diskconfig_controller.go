@@ -152,27 +152,6 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 		}
 	}
 
-	vaList := storagev1.VolumeAttachmentList{}
-	if err := r.Client.List(ctx, &vaList); err != nil {
-		return ctrl.Result{}, fmt.Errorf("unable to list VolumeAttachmentList: %w", err)
-	}
-
-	for i := range vaList.Items {
-		if !controllerutil.ContainsFinalizer(&vaList.Items[i], nsFinalizer) {
-			continue
-		}
-
-		controllerutil.RemoveFinalizer(&vaList.Items[i], nsFinalizer)
-
-		logger := logger.WithValues("sc_name", vaList.Items[i].Name)
-		logger.Info("Remove VolumeAttachmentList finalizer...", "finalizer", nsFinalizer)
-
-		if err := r.Client.Update(ctx, &vaList.Items[i]); err != nil {
-			logger.Info("Failed to remove finalizer of VolumeAttachmentList", "error", err.Error())
-			return ctrl.Result{}, fmt.Errorf("unable to remove finalizer of VolumeAttachmentList: %w", err)
-		}
-	}
-
 	finalizer := utils.RenderFinalizer(configName)
 
 	logger.Info("Update PVCs...")
@@ -191,7 +170,7 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 	pvcSelector := labels.NewSelector().Add(*label)
 
 	pvcList := corev1.PersistentVolumeClaimList{}
-	if err = r.List(ctx, &pvcList, &client.ListOptions{
+	if err = r.Client.List(ctx, &pvcList, &client.ListOptions{
 		Namespace:     configNamespace,
 		LabelSelector: pvcSelector,
 	}); err != nil {
@@ -211,7 +190,7 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 		go func() {
 			defer wg.Done()
 
-			unlock, err := utils.WaitForSemaphore(ctx, sem, errChan)
+			unlock, err := utils.WaitForSemaphore(ctx, sem)
 			if err != nil {
 				logger.Info("Context deadline")
 				errChan <- fmt.Errorf("context deadline %s->%s", pvcList.Items[i].GetNamespace(), pvcList.Items[i].GetName())
@@ -224,7 +203,7 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 				logger := logger.WithValues("pvc_name", pvcList.Items[i].Name, "pvc_namespace", pvcList.Items[i].Namespace)
 				logger.Info("Update PVC finalizer...", "finalizer", finalizer)
 
-				if err = r.Update(ctx, &pvcList.Items[i]); err != nil {
+				if err = r.Client.Update(ctx, &pvcList.Items[i]); err != nil {
 					logger.Info("Failed to remove finalizer of PVC", "error", err.Error())
 					errChan <- fmt.Errorf("unable to remove finalizer of PVC %s->%s: %w", pvcList.Items[i].Namespace, pvcList.Items[i].Name, err)
 					return

@@ -13,7 +13,7 @@ func TestRenderMetricsService(t *testing.T) {
 }
 
 func TestRenderMetricsSidecar(t *testing.T) {
-	_, err := RenderMetricsSidecar(true)
+	_, err := RenderMetricsSidecar()
 
 	assert.Nil(t, err, "invalid sidecar template")
 }
