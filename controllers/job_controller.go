@@ -74,12 +74,17 @@ func (r *JobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 
 	logger.Info("Delete Job...")
 
-	return ctrl.Result{}, r.Client.Delete(ctx, &batchv1.Job{
+	err = r.Client.Delete(ctx, &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      req.Name,
 			Namespace: req.Namespace,
 		},
 	})
+	if !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
