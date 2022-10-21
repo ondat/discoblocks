@@ -31,7 +31,7 @@ func CreateSemaphore(concurrency int, wait time.Duration) Semaphore {
 }
 
 // WaitForSemaphore waits until context cancel
-func WaitForSemaphore(ctx context.Context, sem Semaphore, errChan chan<- error) (func(), error) {
+func WaitForSemaphore(ctx context.Context, sem Semaphore) (func(), error) {
 	var unlock func()
 LOCK:
 	for {

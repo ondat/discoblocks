@@ -8,10 +8,9 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - endpoints
+  - namespaces
   verbs:
-  - list
-  - watch
+  - get
 - apiGroups:
   - ""
   resources:
@@ -51,21 +50,7 @@ rules:
   - pods
   verbs:
   - delete
-  - get
-- apiGroups:
-  - ""
-  resources:
-  - services
-  verbs:
-  - create
-  - delete
-  - update
-- apiGroups:
-  - ""
-  resources:
-  - services/finalizers
-  verbs:
-  - update
+  - list
 - apiGroups:
   - apps
   resources:
@@ -143,6 +128,5 @@ rules:
   - volumeattachments
   verbs:
   - create
-  - get
   - list
   - watch
