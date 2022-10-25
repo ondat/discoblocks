@@ -21,32 +21,17 @@ const hostCommandPrefix = "\n          "
 
 var hostCommandReplacePattern = regexp.MustCompile(`\n`)
 
-const metricsServiceTemplate = `kind: Service
-apiVersion: v1
-metadata:
-  name: "%s"
-  namespace: "%s"
-  annotations:
-    prometheus.io/path: "/metrics"
-    prometheus.io/scrape: "true"
-    prometheus.io/port:   "9100"
-spec:
-  ports:
-  - name: node-exporter
-    protocol: TCP
-    port: 9100
-    targetPort: 9100
-`
-
 const metricsTeamplate = `name: discoblocks-metrics
 image: nixery.dev/shell/ucspi-tcp/mount
 ports:
 - containerPort: 9100
   protocol: TCP
 command:
-- bash
+- sh
 - -c
-- "trap exit SIGTERM ; while true; do tcpserver -v -c 1 -D -P -R -H -t 3 -l 0 0.0.0.0 9100 df & c=$! wait $c; done"
+- |
+  trap exit SIGTERM ;
+  while true; do tcpserver -v -c 1 -D -P -R -H -t 3 -l 0 0.0.0.0 9100 df & c=$! wait $c; done
 securityContext:
   privileged: false
 `
@@ -115,14 +100,21 @@ const (
 DEV_MAJOR=$(chroot /host nsenter --target 1 --mount lsblk -lp | grep ${DEV} | awk '{print $2}'  | awk '{split($0,a,":"); print a[1]}') &&
 DEV_MINOR=$(chroot /host nsenter --target 1 --mount lsblk -lp | grep ${DEV} | awk '{print $2}'  | awk '{split($0,a,":"); print a[2]}') &&
 for CONTAINER_ID in ${CONTAINER_IDS}; do
-	PID=$(docker inspect -f '{{.State.Pid}}' ${CONTAINER_ID} || crictl inspect --output go-template --template '{{.info.pid}}' ${CONTAINER_ID}) &&
-	chroot /host nsenter --target ${PID} --mount mkdir -p $(dirname ${DEV}) ${MOUNT_POINT} &&
-	chroot /host nsenter --target ${PID} --pid --mount mknod ${DEV} b ${DEV_MAJOR} ${DEV_MINOR} &&
-	chroot /host nsenter --target ${PID} --mount mount ${DEV} ${MOUNT_POINT}
+	chroot /host nsenter --target ${PID} --mount mount | grep "${DEV} on ${MOUNT_POINT}" || (
+		PID=$(docker inspect -f '{{.State.Pid}}' ${CONTAINER_ID} || crictl inspect --output go-template --template '{{.info.pid}}' ${CONTAINER_ID}) &&
+		(
+			chroot /host nsenter --target ${PID} --mount mkdir -p $(dirname ${DEV}) ${MOUNT_POINT} &&
+			chroot /host nsenter --target ${PID} --pid --mount mknod ${DEV} b ${DEV_MAJOR} ${DEV_MINOR} &&
+			chroot /host nsenter --target ${PID} --mount mount ${DEV} ${MOUNT_POINT}
+		)
+	)
 done`
 )
 
 const resizeCommandTemplate = `%s
+chroot /host nsenter --target 1 --mount mkdir -p /tmp/discoblocks${DEV} &&
+chroot /host nsenter --target 1 --mount mount ${DEV} /tmp/discoblocks${DEV} &&
+trap "chroot /host nsenter --target 1 --mount umount /tmp/discoblocks${DEV}" EXIT &&
 (
 	([ "${FS}" = "ext3" ] && chroot /host nsenter --target 1 --mount resize2fs ${DEV}) ||
 	([ "${FS}" = "ext4" ] && chroot /host nsenter --target 1 --mount resize2fs ${DEV}) ||
@@ -130,16 +122,6 @@ const resizeCommandTemplate = `%s
 	([ "${FS}" = "btrfs" ] && chroot /host nsenter --target 1 --mount btrfs filesystem resize max ${DEV}) ||
 	echo unsupported file-system $FS
 )`
-
-// RenderMetricsService returns the metrics service
-func RenderMetricsService(name, namespace string) (*corev1.Service, error) {
-	service := corev1.Service{}
-	if err := yaml.Unmarshal([]byte(fmt.Sprintf(metricsServiceTemplate, name, namespace)), &service); err != nil {
-		return nil, fmt.Errorf("unable to unmarshal service: %w", err)
-	}
-
-	return &service, nil
-}
 
 // RenderMetricsSidecar returns the metrics sidecar
 func RenderMetricsSidecar() (*corev1.Container, error) {
@@ -152,7 +134,7 @@ func RenderMetricsSidecar() (*corev1.Container, error) {
 }
 
 // RenderMountJob returns the mount job executed on host
-func RenderMountJob(pvcName, pvName, namespace, nodeName, fs, mountPoint string, containerIDs []string, preMountCommand string, volumeMeta string, owner metav1.OwnerReference) (*batchv1.Job, error) {
+func RenderMountJob(pvcName, pvName, namespace, nodeName, fs, mountPoint string, containerIDs []string, preMountCommand, volumeMeta string, owner metav1.OwnerReference) (*batchv1.Job, error) {
 	if preMountCommand != "" {
 		preMountCommand += " && "
 	}

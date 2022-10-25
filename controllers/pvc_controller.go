@@ -378,6 +378,7 @@ func (r *PVCReconciler) MonitorVolumes() {
 	}
 }
 
+//nolint:gocyclo // It is complex we know
 func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, pod *corev1.Pod, parentPVC *corev1.PersistentVolumeClaim, containerIDs []string, nodeName string, nextIndex int, logger logr.Logger) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
