@@ -59,7 +59,10 @@ func GetCSIDriverPodLabels() {
 
 //export GetPreMountCommand
 func GetPreMountCommand() {
-	fmt.Fprint(os.Stdout, `DEV=/var/lib/storageos/volumes/$(chroot /host nsenter --target 1 --mount ls /var/lib/storageos/volumes -Atr | tail -1)`)
+	fmt.Fprintf(os.Stdout, `VOL=$(chroot /host nsenter --target 1 --mount sh -c "grep ^ /dev/null /var/lib/storageos/state/*" | grep ${PV_NAME} | awk '{split($0,a,":"); print a[1]}' | grep -oe "v\..*\.json$"| awk '{gsub(".json","",$1); print $1}') &&
+chroot /host nsenter --target 1 --mount mkdir -p /var/lib/kubelet/plugins/kubernetes.io/csi/pv/${PV_NAME}/mount &&
+chroot /host nsenter --target 1 --mount mount /var/lib/storageos/volumes/${VOL} /var/lib/kubelet/plugins/kubernetes.io/csi/pv/${PV_NAME}/mount &&
+DEV=/${PV_NAME}`)
 }
 
 //export GetPreResizeCommand
