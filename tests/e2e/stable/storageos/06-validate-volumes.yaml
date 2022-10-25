@@ -1,6 +1,9 @@
 apiVersion: kuttl.dev/v1beta1
 kind: TestStep
 commands:
+  - command: sh -c "kubectl exec $(kubectl get po | tail -1 | awk '{print $1}') -- ls -l /media/discoblocks/once-0"
   - command: sh -c "kubectl exec $(kubectl get po | tail -1 | awk '{print $1}') -- ls -l /media/discoblocks/same-0/data0"
   - command: sh -c "kubectl exec $(kubectl get po | tail -1 | awk '{print $1}') -- ls -l /media/discoblocks/same-1/data1"
+  - command: sh -c "kubectl exec -n pod-with-host-pid $(kubectl get po -n pod-with-host-pid | tail -1 | awk '{print $1}') -- ls -l /media/discoblocks/once-0/data0"
+  - command: sh -c "kubectl exec -n pod-with-host-pid $(kubectl get po -n pod-with-host-pid | tail -1 | awk '{print $1}') -- ls -l /media/discoblocks/once-1/data1"
   - command: sh -c "kubectl exec -n kube-system $(kubectl get po -n kube-system -l name=fluentd-elasticsearch --no-headers | tail -1 | awk '{print $1}') -- ls -l /media/discoblocks/daemon-0/data0"

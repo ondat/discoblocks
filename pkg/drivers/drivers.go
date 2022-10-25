@@ -133,9 +133,13 @@ func (d *Driver) GetStorageClassAllowedTopology(node *corev1.Node) ([]corev1.Top
 	}
 
 	terms := []corev1.TopologySelectorTerm{}
-	err = json.Unmarshal(wasiEnv.ReadStdout(), &terms)
-	if err != nil {
-		return nil, fmt.Errorf("unable to parse output: %w", err)
+
+	resp := wasiEnv.ReadStdout()
+	if len(resp) != 0 {
+		err = json.Unmarshal(wasiEnv.ReadStdout(), &terms)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse output: %w", err)
+		}
 	}
 
 	return terms, nil

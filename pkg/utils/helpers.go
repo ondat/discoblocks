@@ -78,8 +78,8 @@ func RenderResourceName(prefix bool, elems ...string) (string, error) {
 }
 
 // RenderUniqueLabel renders DiskConfig label
-func RenderUniqueLabel(name string) string {
-	hash, err := Hash(name)
+func RenderUniqueLabel(id string) string {
+	hash, err := Hash(id)
 	if err != nil {
 		panic("Unable to calculate hash, better to say good bye!")
 	}
