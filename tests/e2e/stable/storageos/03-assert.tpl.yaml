@@ -217,8 +217,8 @@ metadata:
   namespace: default
 spec:
   containers:
-  - image: nginx:1.23
-  - image: nixery.dev/shell/ucspi-tcp/mount
+  - name: nginx
+  - name: discoblocks-metrics
 status:
   phase: Running
 
