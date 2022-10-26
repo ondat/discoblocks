@@ -326,6 +326,13 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		})
 	}
 
+	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+		Name: "discoblocks-tools",
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{},
+		},
+	})
+
 	logger.Info("Attach volume mounts...")
 
 	for i := range pod.Spec.Containers {
@@ -335,6 +342,12 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 				MountPath: mp,
 			})
 		}
+
+		pod.Spec.Containers[i].VolumeMounts = append(pod.Spec.Containers[i].VolumeMounts, corev1.VolumeMount{
+			Name:      "discoblocks-tools",
+			MountPath: "/opt/discoblocks",
+			ReadOnly:  pod.Spec.Containers[i].Name != "discoblocks-metrics",
+		})
 	}
 
 	marshaledPod, err := json.Marshal(pod)

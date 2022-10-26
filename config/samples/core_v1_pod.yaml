@@ -6,9 +6,10 @@ metadata:
   name: diskconfig-sample
 spec:
   # hostPID: true
+  terminationGracePeriodSeconds: 1
   containers:
   - name: alpine
-    image: alpine:3.15.4
+    image: alpine:3.16
     command:
     - sleep
     - infinity

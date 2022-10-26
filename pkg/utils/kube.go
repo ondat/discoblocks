@@ -22,7 +22,7 @@ const hostCommandPrefix = "\n          "
 var hostCommandReplacePattern = regexp.MustCompile(`\n`)
 
 const metricsTeamplate = `name: discoblocks-metrics
-image: nixery.dev/shell/ucspi-tcp/mount
+image: alpine:3.16
 ports:
 - containerPort: 9100
   protocol: TCP
@@ -30,6 +30,10 @@ command:
 - sh
 - -c
 - |
+  apk add patchelf ucspi-tcp &&
+  cp /bin/busybox /opt/discoblocks &&
+  cp -r /lib /opt/discoblocks &&
+  patchelf --set-interpreter /opt/discoblocks/lib/ld-musl-x86_64.so.1 /opt/discoblocks/busybox &&
   trap exit SIGTERM ;
   while true; do tcpserver -v -c 1 -D -P -R -H -t 3 -l 0 0.0.0.0 9100 df & c=$! wait $c; done
 securityContext:
@@ -99,14 +103,13 @@ const (
 	mountCommandTemplate = `%s
 DEV_MAJOR=$(chroot /host nsenter --target 1 --mount lsblk -lp | grep ${DEV} | awk '{print $2}'  | awk '{split($0,a,":"); print a[1]}') &&
 DEV_MINOR=$(chroot /host nsenter --target 1 --mount lsblk -lp | grep ${DEV} | awk '{print $2}'  | awk '{split($0,a,":"); print a[2]}') &&
+export LD_LIBRARY_PATH=/opt/discoblocks/lib &&
 for CONTAINER_ID in ${CONTAINER_IDS}; do
-	chroot /host nsenter --target ${PID} --mount mount | grep "${DEV} on ${MOUNT_POINT}" || (
-		PID=$(docker inspect -f '{{.State.Pid}}' ${CONTAINER_ID} || crictl inspect --output go-template --template '{{.info.pid}}' ${CONTAINER_ID}) &&
-		(
-			chroot /host nsenter --target ${PID} --mount mkdir -p $(dirname ${DEV}) ${MOUNT_POINT} &&
-			chroot /host nsenter --target ${PID} --pid --mount mknod ${DEV} b ${DEV_MAJOR} ${DEV_MINOR} &&
-			chroot /host nsenter --target ${PID} --mount mount ${DEV} ${MOUNT_POINT}
-		)
+	PID=$(docker inspect -f '{{.State.Pid}}' ${CONTAINER_ID} || crictl inspect --output go-template --template '{{.info.pid}}' ${CONTAINER_ID}) &&
+	chroot /host nsenter --target ${PID} --mount /opt/discoblocks/busybox mount | grep "${DEV} on ${MOUNT_POINT}" || (
+		chroot /host nsenter --target ${PID} --mount /opt/discoblocks/busybox mkdir -p $(dirname ${DEV}) ${MOUNT_POINT} &&
+		(chroot /host nsenter --target ${PID} --pid --mount /opt/discoblocks/busybox mknod ${DEV} b ${DEV_MAJOR} ${DEV_MINOR} ||:) &&
+		chroot /host nsenter --target ${PID} --mount /opt/discoblocks/busybox mount ${DEV} ${MOUNT_POINT}
 	)
 done`
 )
