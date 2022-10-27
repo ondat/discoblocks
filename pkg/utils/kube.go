@@ -31,7 +31,7 @@ command:
 - -c
 - |
   trap exit SIGTERM ;
-  while true; do tcpserver -v -c 1 -D -P -R -H -t 3 -l 0 0.0.0.0 9100 df & c=$! wait $c; done
+  while true; do tcpserver -v -c 1 -D -P -R -H -t 3 -l 0 0.0.0.0 9100 df -P & c=$! wait $c; done
 securityContext:
   privileged: false
 `
