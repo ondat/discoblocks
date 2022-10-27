@@ -1,0 +1,76 @@
+name: Release Version
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  pull-requests: read
+  actions: read
+  security-events: write
+  packages: write
+
+concurrency:
+  group: ci-release-${{ github.ref }}-1
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_TAG: ${{ github.sha }}
+jobs:
+  test:
+    uses: ./.github/workflows/_test.yml
+
+  golangci-lint:
+    uses: ./.github/workflows/_gocilint.yml
+
+  gosec-scanning:
+    uses: ./.github/workflows/_gosecscan.yml
+    needs: golangci-lint
+
+  image-build:
+    uses: ./.github/workflows/_docker-build.yml
+    needs: gosec-scanning
+
+  image-vulnerability-scan:
+    uses: ./.github/workflows/_trivy.yml
+    needs: image-build
+
+  kuttl:
+    uses: ./.github/workflows/_kuttl.yml
+    needs: image-build
+
+  auto-pre-release:
+    if: startsWith(github.ref, 'refs/tags/v') && (contains(github.ref_name, '-alpha.') || contains(github.ref_name, '-beta.'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: log in to ghrc.io 
+        uses: docker/login-action@1edf6180e07d2ffb423fc48a1a552855c0a1f508
+        with: 
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag and push image
+        run: |
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+      - name: Generate bundle manifest
+        run: make bundle
+        env:
+          IMG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+      - name: Compress Kustomize manifests
+        run: (cd config ; tar -czvf ../discoblocks-kustomize.tar.gz .)
+      - name: Create pre-release
+        uses: softprops/action-gh-release@v1
+        with:
+          prerelease: true
+          generate_release_notes: true
+          files: |
+            discoblocks-bundle.yaml
+            discoblocks-kustomize.tar.gz
+    needs: kuttl

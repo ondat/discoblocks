@@ -19,12 +19,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test:
+    uses: ./.github/workflows/_test.yml
+
   golangci-lint:
     uses: ./.github/workflows/_gocilint.yml
   
   gosec-scanning:
     uses: ./.github/workflows/_gosecscan.yml
-    needs: golangci-lint
     
   image-build:
     uses: ./.github/workflows/_docker-build.yml
