@@ -2,6 +2,9 @@ name: Release Version
 
 on:
   push:
+    branches:
+      - main
+      - release-pipeline
     tags:
       - "v*"
 
@@ -65,11 +68,12 @@ jobs:
       - name: Compress Kustomize manifests
         run: (cd config ; tar -czvf ../discoblocks-kustomize.tar.gz .)
       - name: Set since tag
-        run: echo "SINCE_TAG=$(git describe --tags --always `git rev-list --tags` | grep -e '^v[0-9]+*\.[0-9]+*\.[0-9]+*$' | head -1)" >> $GITHUB_ENV
+        run: echo "SINCE_TAG=v0.0.5" >> $GITHUB_ENV
       - name: "Generate release changelog"
         uses: heinrichreimer/github-changelog-generator-action@v2.3
         with:
           token: ${{ secrets.GITHUB_TOKEN }} 
+          base: .github/RELEASE_TEMPLATE.md
           sinceTag: ${{ env.SINCE_TAG }}
           simpleList: true
       - name: Fix version in changelog

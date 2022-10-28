@@ -27,4 +27,6 @@ kubeconfig
 *.swo
 *~
 
+CHANGELOG.md
 discoblocks-bundle.yaml
+discoblocks-kustomize.tar.gz
