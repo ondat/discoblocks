@@ -18,12 +18,33 @@ parameters:
   type: gp3
 allowVolumeExpansion: true
 reclaimPolicy: Retain
-volumeBindingMode: Immediate
+volumeBindingMode: WaitForFirstConsumer
 EOF
 
-kubectl apply -f https://github.com/ondat/discoblocks/releases/download/#VERSION#/discoblocks_#VERSION#.yaml
-kubectl apply -f https://github.com/ondat/discoblocks/releases/download/#VERSION#/discoblocks.ondat.io_v1_diskconfig-ebs.csi.aws.com.yaml
-kubectl apply -f https://github.com/ondat/discoblocks/releases/download/#VERSION#/core_v1_pod.yaml
+kubectl apply -f https://github.com/ondat/discoblocks/releases/download/#VERSION#/discoblocks-bundle.yaml
+
+cat <<EOF | kubectl apply -f -
+apiVersion: discoblocks.ondat.io/v1
+kind: DiskConfig
+metadata:
+  name: nginx
+spec:
+  storageClassName: ebs-sc
+  capacity: 1Gi
+  mountPointPattern: /usr/share/nginx/html/data
+  nodeSelector:
+    matchLabels:
+      kubernetes.io/os: linux 
+  podSelector:
+       app: nginx
+  policy:
+    upscaleTriggerPercentage: 80
+    maximumCapacityOfDisk: 2Gi
+    maximumNumberOfDisks: 3
+    coolDown: 10m
+EOF
+
+kubectl apply create deployment --image=nginx nginx
 ```
 
 ### Build your own version
@@ -31,5 +52,6 @@ kubectl apply -f https://github.com/ondat/discoblocks/releases/download/#VERSION
 git clone -b #VERSION# https://github.com/ondat/discoblocks.git
 cd discoblocks
 export IMG=myregistry/discconfig:current
-make docker-build docker-push deploy
+make docker-build docker-push deploy bundle
+kubectl apply -f discoblocks-bundle.yaml
 ```
