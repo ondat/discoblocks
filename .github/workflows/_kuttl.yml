@@ -27,9 +27,7 @@ jobs:
           sudo curl -Lo $KUTTL https://github.com/kudobuilder/kuttl/releases/download/v0.11.1/kubectl-kuttl_0.11.1_linux_x86_64
           sudo chmod +x $KUTTL
       - name: pull and tag image
-        run: |
-          docker pull ghcr.io/ondat/discoblocks:${{ github.sha }}
-          docker tag ghcr.io/ondat/discoblocks:${{ github.sha }} ${{ env.IMG }}
+        run: docker tag ghcr.io/ondat/discoblocks:${{ github.sha }} ${{ env.IMG }}
       - name: run kuttl
         run: kubectl-kuttl test --config tests/e2e/kuttl/kuttl-config-1.23.yaml
       - uses: actions/upload-artifact@v3
