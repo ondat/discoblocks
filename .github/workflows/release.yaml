@@ -29,11 +29,10 @@ jobs:
 
   gosec-scanning:
     uses: ./.github/workflows/_gosecscan.yml
-    needs: golangci-lint
 
   image-build:
     uses: ./.github/workflows/_docker-build.yml
-    needs: gosec-scanning
+    needs: test, golangci-lint, gosec-scanning]
 
   image-vulnerability-scan:
     uses: ./.github/workflows/_trivy.yml
@@ -66,12 +65,17 @@ jobs:
           IMG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
       - name: Compress Kustomize manifests
         run: (cd config ; tar -czvf ../discoblocks-kustomize.tar.gz .)
+      - name: "Generate release changelog"
+        uses: heinrichreimer/github-changelog-generator-action@v2.3
+        with:
+          output: release-notes.md
+          onlyLastTag: true
       - name: Create pre-release
         uses: softprops/action-gh-release@v1
         with:
           prerelease: true
-          generate_release_notes: true
+          body_path: release-notes.md
           files: |
             discoblocks-bundle.yaml
             discoblocks-kustomize.tar.gz
-    needs: kuttl
+    needs: [image-vulnerability-scan, kuttl]
