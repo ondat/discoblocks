@@ -42,8 +42,7 @@ jobs:
     uses: ./.github/workflows/_kuttl.yml
     needs: image-build
 
-  auto-pre-release:
-    if: startsWith(github.ref, 'refs/tags/v') && (contains(github.ref_name, '-alpha.') || contains(github.ref_name, '-beta.'))
+  auto-release:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -65,20 +64,22 @@ jobs:
           IMG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
       - name: Compress Kustomize manifests
         run: (cd config ; tar -czvf ../discoblocks-kustomize.tar.gz .)
+      - name: Set since tag
+        run: echo "SINCE_TAG=$(git describe --tags --always `git rev-list --tags` | grep -e '^v[0-9]+*\.[0-9]+*\.[0-9]+*$' | head -1)" >> $GITHUB_ENV
       - name: "Generate release changelog"
         uses: heinrichreimer/github-changelog-generator-action@v2.3
         with:
           token: ${{ secrets.GITHUB_TOKEN }} 
-          output: release-notes.md
-          onlyLastTag: true
+          sinceTag: ${{ env.SINCE_TAG }}
+          simpleList: true
+      - name: Fix version in changelog
+        run: sed -i "s/#VERSION#/${{ github.ref_name }}/g" CHANGELOG.md
       - name: Create pre-release
         uses: softprops/action-gh-release@v1
         with:
           prerelease: true
-          body_path: release-notes.md
+          body_path: CHANGELOG.md
           files: |
             discoblocks-bundle.yaml
             discoblocks-kustomize.tar.gz
     needs: [image-vulnerability-scan, kuttl]
-
-# for auto release changelog generator: sinceTag: git describe --tags --always `git rev-list --tags` | grep -e '^v[0-9]+*\.[0-9]+*\.[0-9]+*$' | head -1
