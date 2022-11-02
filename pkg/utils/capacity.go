@@ -16,7 +16,11 @@ func ParseCapacity(capacity string) (uint16, string, error) {
 	if parts == nil {
 		return 0, "", errInvalidCapacity
 	}
-	sizeInt, err := strconv.Atoi(string(parts[0][1]))
+
+	const base = 10
+	const size = 16
+
+	sizeInt, err := strconv.ParseUint(string(parts[0][1]), base, size)
 	if err != nil {
 		return 0, "", errors.New("invalid size")
 	}
