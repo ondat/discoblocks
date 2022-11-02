@@ -57,6 +57,7 @@ At the current stage, Discoblocks is leveraging the available hyperscaler CSI (C
 - provision the relevant disk device using the CSI (like EBS on AWS) when the workload deployment will happen
 - monitor the volume(s)
 - resize automatically the volume based on the upscale policy
+- create and mount new volumes in running pod based on maximum number of disks
 
 **Note:** that an application could be using Discoblocks to get persistent storage but this option would not be safe for production as there will not be any data platform management to address high availability, replication, fencing, encryption, ...
 
