@@ -108,6 +108,13 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/default | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
 
+.PHONY: bundle
+bundle: manifests kustomize ## Generates Kubernetes manifests
+	rm -rf discoblocks-bundle.yaml
+	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	$(KUSTOMIZE) build config/default > discoblocks-bundle.yaml
+	cd config/manager && $(KUSTOMIZE) edit set image controller=discoblocks:latest
+
 .PHONY: deploy-cert-manager
 deploy-cert-manager: manifests kustomize ## Deploy cert manager to the K8s cluster specified in ~/.kube/config.
 	kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.8.0/cert-manager.yaml
