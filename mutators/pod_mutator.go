@@ -229,6 +229,26 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 				logger.Info("PVC already exists")
 
+				finalizer := utils.RenderFinalizer(config.Name)
+
+				logger.Info("Fetch PVC...")
+
+				if err = a.Client.Get(ctx, types.NamespacedName{Name: pvc.Name, Namespace: pvc.Namespace}, pvc); err != nil {
+					logger.Error(err, "Unable to fetch PVC", "name", pvc.Name)
+					return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to fetch PVC %s: %w", pvc.Name, err))
+				}
+
+				if !controllerutil.ContainsFinalizer(pvc, finalizer) {
+					controllerutil.AddFinalizer(pvc, finalizer)
+
+					logger.Info("Update PVC finalizer...", "name", pvc.Name)
+
+					if err = a.Client.Update(ctx, pvc); err != nil {
+						logger.Error(err, "Unable to update PVC finalizer", "name", pvc.Name)
+						return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to update PVC finalizer %s: %w", pvc.Name, err))
+					}
+				}
+
 				if config.Spec.AvailabilityMode != discoblocksondatiov1.ReadWriteOnce {
 					label, err := labels.NewRequirement("discoblocks-parent", selection.Equals, []string{pvc.Name})
 					if err != nil {
@@ -254,8 +274,19 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 					})
 
 					for i := range pvcs.Items {
-						if pvcs.Items[i].DeletionTimestamp != nil || !controllerutil.ContainsFinalizer(&pvcs.Items[i], utils.RenderFinalizer(config.Name)) {
+						if pvcs.Items[i].DeletionTimestamp != nil {
 							continue
+						}
+
+						if !controllerutil.ContainsFinalizer(&pvcs.Items[i], finalizer) {
+							controllerutil.AddFinalizer(&pvcs.Items[i], finalizer)
+
+							logger.Info("Update PVC child finalizer...", "name", pvcs.Items[i].Name)
+
+							if err = a.Client.Update(ctx, &pvcs.Items[i]); err != nil {
+								logger.Error(err, "Unable to update PVC finalizer", "name", pvcs.Items[i].Name)
+								return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to update PVC finalizer %s: %w", pvcs.Items[i].Name, err))
+							}
 						}
 
 						if _, ok := pvcs.Items[i].Labels["discoblocks-index"]; !ok {
