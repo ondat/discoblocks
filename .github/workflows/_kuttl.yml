@@ -7,6 +7,9 @@ env:
   KUTTL: /usr/local/bin/kubectl-kuttl
   KUBECTL_STORAGEOS: /usr/local/bin/kubectl-storageos
   PLUGIN_PATH: ./kubectl-storageos
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_TAG: ${{ github.sha }}
 jobs:
   test:
     name: test
@@ -28,8 +31,8 @@ jobs:
           sudo chmod +x $KUTTL
       - name: pull and tag image
         run: |
-          docker pull ghcr.io/ondat/discoblocks:${{ github.sha }}
-          docker tag ghcr.io/ondat/discoblocks:${{ github.sha }} ${{ env.IMG }}
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} ${{ env.IMG }}
       - name: run kuttl
         run: kubectl-kuttl test --config tests/e2e/kuttl/kuttl-config-1.23.yaml
       - uses: actions/upload-artifact@v3
