@@ -442,8 +442,27 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, pod *
 
 		if err = r.Create(ctx, topologySC); err != nil {
 			if !apierrors.IsAlreadyExists(err) {
-				logger.Error(err, "Failed to create StorageClass")
+				logger.Error(err, "Failed to create topology StorageClass")
 				return
+			}
+
+			logger.Info("Fetch topology StorageClass...")
+
+			if err = r.Client.Get(ctx, types.NamespacedName{Name: topologySC.Name}, topologySC); err != nil {
+				logger.Error(err, "Failed to fetch topology StorageClass")
+				return
+			}
+
+			scFinalizer := utils.RenderFinalizer(config.Name, config.Namespace)
+			if !controllerutil.ContainsFinalizer(topologySC, scFinalizer) {
+				controllerutil.AddFinalizer(topologySC, scFinalizer)
+
+				logger.Info("Update topology StorageClass finalizer...", "name", topologySC.Name)
+
+				if err = r.Client.Update(ctx, topologySC); err != nil {
+					logger.Error(err, "Failed to update topology StorageClass")
+					return
+				}
 			}
 		}
 
