@@ -3,9 +3,7 @@ name: golangci-lint
 on:
   workflow_dispatch:
 
-permissions: 
-  contents: read
-  pull-requests: read
+permissions: read-all
 
 jobs:
   golangci:

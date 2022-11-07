@@ -2,7 +2,7 @@ name: golangci-lint
 
 on: workflow_call
 
-permissions: 
+permissions:
   contents: read
   pull-requests: read
 

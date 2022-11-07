@@ -2,7 +2,7 @@ name: kuttl test
 
 on: workflow_call
 
-permissions: 
+permissions:
   contents: read
   pull-requests: read
 
