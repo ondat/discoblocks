@@ -12,7 +12,7 @@ jobs:
     name: lint
     runs-on: ubuntu-latest
     steps: 
-      - uses: actions/setup-go@bf7ccf173eb621cba29f5e204628485c22b25c32
+      - uses: actions/setup-go@c4a742cab115ed795e34d4513e2cf7d472deb55f
       - uses: actions/checkout@a12a3943b4bdde767164f792f33f40b04645d846
       - name: golangci-lint
         uses: golangci/golangci-lint-action@4b237a63e5299c390fb934f06848da715fdde07c
