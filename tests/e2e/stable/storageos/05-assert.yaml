@@ -16,4 +16,4 @@ metadata:
   name: fluentd-elasticsearch
   namespace: kube-system
 status:
-  currentNumberScheduled: 1
+  numberReady: 1
