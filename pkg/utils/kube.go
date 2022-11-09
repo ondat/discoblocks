@@ -47,6 +47,10 @@ metadata:
   namespace: "%s"
   labels:
     app: discoblocks
+  annotations:
+    discoblocks/operation: "%s"
+    discoblocks/pod: "%s"
+    discoblocks/pvc: "%s"
 spec:
   template:
     spec:
@@ -137,7 +141,7 @@ func RenderMetricsSidecar() (*corev1.Container, error) {
 }
 
 // RenderMountJob returns the mount job executed on host
-func RenderMountJob(pvcName, pvName, namespace, nodeName, fs, mountPoint string, containerIDs []string, preMountCommand, volumeMeta string, owner metav1.OwnerReference) (*batchv1.Job, error) {
+func RenderMountJob(podName, pvcName, pvName, namespace, nodeName, fs, mountPoint string, containerIDs []string, preMountCommand, volumeMeta string, owner metav1.OwnerReference) (*batchv1.Job, error) {
 	if preMountCommand != "" {
 		preMountCommand += " && "
 	}
@@ -150,7 +154,7 @@ func RenderMountJob(pvcName, pvName, namespace, nodeName, fs, mountPoint string,
 		return nil, fmt.Errorf("unable to render resource name: %w", err)
 	}
 
-	template := fmt.Sprintf(hostJobTemplate, jobName, namespace, nodeName, mountPoint, strings.Join(containerIDs, " "), pvcName, pvName, fs, volumeMeta, mountCommand)
+	template := fmt.Sprintf(hostJobTemplate, jobName, namespace, "mount", podName, pvcName, nodeName, mountPoint, strings.Join(containerIDs, " "), pvcName, pvName, fs, volumeMeta, mountCommand)
 
 	job := batchv1.Job{}
 	if err := yaml.Unmarshal([]byte(template), &job); err != nil {
@@ -166,7 +170,7 @@ func RenderMountJob(pvcName, pvName, namespace, nodeName, fs, mountPoint string,
 }
 
 // RenderResizeJob returns the resize job executed on host
-func RenderResizeJob(pvcName, pvName, namespace, nodeName, fs, preResizeCommand, volumeMeta string, owner metav1.OwnerReference) (*batchv1.Job, error) {
+func RenderResizeJob(podName, pvcName, pvName, namespace, nodeName, fs, preResizeCommand, volumeMeta string, owner metav1.OwnerReference) (*batchv1.Job, error) {
 	if preResizeCommand != "" {
 		preResizeCommand += " && "
 	}
@@ -179,7 +183,7 @@ func RenderResizeJob(pvcName, pvName, namespace, nodeName, fs, preResizeCommand,
 		return nil, fmt.Errorf("unable to render resource name: %w", err)
 	}
 
-	template := fmt.Sprintf(hostJobTemplate, jobName, namespace, nodeName, "", "", pvcName, pvName, fs, volumeMeta, resizeCommand)
+	template := fmt.Sprintf(hostJobTemplate, jobName, namespace, "resize", podName, pvcName, nodeName, "", "", pvcName, pvName, fs, volumeMeta, resizeCommand)
 
 	job := batchv1.Job{}
 	if err := yaml.Unmarshal([]byte(template), &job); err != nil {

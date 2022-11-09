@@ -56,8 +56,9 @@ type nodeCache interface {
 
 // PVCReconciler reconciles a PVC object
 type PVCReconciler struct {
-	NodeCache  nodeCache
-	InProgress sync.Map
+	EventService utils.EventService
+	NodeCache    nodeCache
+	InProgress   sync.Map
 	client.Client
 	Scheme *runtime.Scheme
 }
@@ -256,6 +257,10 @@ func (r *PVCReconciler) MonitorVolumes() {
 
 				diskInfo, err := utils.FetchDiskInfo(fmt.Sprintf("%s:9100", pod.Status.PodIP))
 				if err != nil {
+					if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", "Failed to fetch disk info", err.Error(), &pod, nil); err != nil {
+						logger.Error(err, "Failed to create event")
+					}
+
 					logger.Error(err, "Unable to fetch disk info")
 					return
 				}
@@ -299,6 +304,10 @@ func (r *PVCReconciler) MonitorVolumes() {
 					if lastIndex, ok := lastPVC.Labels["discoblocks-index"]; ok {
 						actIndex, err = strconv.Atoi(lastIndex)
 						if err != nil {
+							if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to convert last index of %s: %s", lastPVC.Name, lastIndex), err.Error(), &pod, nil); err != nil {
+								logger.Error(err, "Failed to create event")
+							}
+
 							logger.Error(err, "Unable to convert index")
 							continue
 						}
@@ -310,6 +319,10 @@ func (r *PVCReconciler) MonitorVolumes() {
 
 					lastUsed, ok := diskInfo[lastMountPoint]
 					if !ok {
+						if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to find metrics of %s: %s", lastPVC.Name, lastMountPoint), err.Error(), &pod, nil); err != nil {
+							logger.Error(err, "Failed to create event")
+						}
+
 						logger.Error(err, "Unable to find metrics", "disk_info", diskInfo)
 						continue
 					}
@@ -330,6 +343,10 @@ func (r *PVCReconciler) MonitorVolumes() {
 
 					nodeName := r.NodeCache.GetNodesByIP()[pod.Status.HostIP]
 					if nodeName == "" {
+						if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Node not found for %s: %s", lastPVC.Name, pod.Status.HostIP), err.Error(), &pod, nil); err != nil {
+							logger.Error(err, "Failed to create event")
+						}
+
 						logger.Error(errors.New("node not found: "+pod.Status.HostIP), "Node not found", "IP", pod.Status.HostIP)
 						continue
 					}
@@ -369,7 +386,7 @@ func (r *PVCReconciler) MonitorVolumes() {
 
 					r.InProgress.Store(config.Name, time.Now())
 
-					go r.resizePVC(&config, newCapacity, lastPVC, nodeName, logger)
+					go r.resizePVC(&config, &pod, newCapacity, lastPVC, nodeName, logger)
 				}
 			}()
 		}
@@ -388,9 +405,18 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, pod *
 	sc := storagev1.StorageClass{}
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: config.Spec.StorageClassName}, &sc); err != nil {
 		if apierrors.IsNotFound(err) {
+			if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("StorageClass not found for %s: %s", config.Name, config.Spec.StorageClassName), err.Error(), pod, config); err != nil {
+				logger.Error(err, "Failed to create event")
+			}
+
 			logger.Error(err, "StorageClass not found", "sc_name", config.Spec.StorageClassName)
 			return
 		}
+
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to fetch StorageClass for %s: %s", config.Name, config.Spec.StorageClassName), err.Error(), pod, config); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
 		logger.Error(err, "Unable to fetch StorageClass")
 		return
 	}
@@ -400,13 +426,23 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, pod *
 
 	node := &corev1.Node{}
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to fetch Node for %s: %s", config.Name, nodeName), err.Error(), pod, config); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
 		logger.Error(err, "Failed to get Node")
 		return
 	}
 
 	driver := drivers.GetDriver(sc.Provisioner)
 	if driver == nil {
-		logger.Error(errors.New("driver not found: "+sc.Provisioner), "Driver not found")
+		dmErr := errors.New("driver not found: " + sc.Provisioner)
+
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to find driver for %s: %s", config.Name, sc.Provisioner), dmErr.Error(), pod, config); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
+		logger.Error(dmErr, "Driver not found")
 		return
 	}
 
@@ -414,6 +450,10 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, pod *
 
 	pvc, err := utils.NewPVC(config, prefix, driver)
 	if err != nil {
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to create new PVC for %s", config.Name), err.Error(), pod, config); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
 		logger.Error(err, "Unable to construct new PVC")
 		return
 	}
@@ -421,12 +461,20 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, pod *
 
 	scAllowedTopology, err := driver.GetStorageClassAllowedTopology(node)
 	if err != nil {
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to call driver.GetStorageClassAllowedTopology for %s: %s", config.Name, sc.Provisioner), err.Error(), pod, config); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
 		logger.Error(err, "Failed to call driver", "method", "GetStorageClassAllowedTopology")
 		return
 	}
 
 	waitForMeta, err := driver.WaitForVolumeAttachmentMeta()
 	if err != nil {
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to call driver.WaitForVolumeAttachmentMeta %s: %s", config.Name, sc.Provisioner), err.Error(), pod, config); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
 		logger.Error(err, "Failed to call driver", "method", "WaitForVolumeAttachmentMeta")
 		return
 	}
@@ -434,6 +482,10 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, pod *
 	if len(scAllowedTopology) != 0 {
 		topologySC, err := utils.NewStorageClass(&sc, scAllowedTopology)
 		if err != nil {
+			if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to create new StorageClass for %s", config.Name), err.Error(), pod, config); err != nil {
+				logger.Error(err, "Failed to create event")
+			}
+
 			logger.Error(err, "Failed to render get NewStorageClass")
 			return
 		}
@@ -442,6 +494,10 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, pod *
 
 		if err = r.Create(ctx, topologySC); err != nil {
 			if !apierrors.IsAlreadyExists(err) {
+				if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to create StorageClass for %s: %s", config.Name, topologySC.Name), err.Error(), pod, config); err != nil {
+					logger.Error(err, "Failed to create event")
+				}
+
 				logger.Error(err, "Failed to create topology StorageClass")
 				return
 			}
@@ -449,6 +505,10 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, pod *
 			logger.Info("Fetch topology StorageClass...")
 
 			if err = r.Client.Get(ctx, types.NamespacedName{Name: topologySC.Name}, topologySC); err != nil {
+				if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to fetch StorageClass for %s: %s", config.Name, topologySC.Name), err.Error(), pod, config); err != nil {
+					logger.Error(err, "Failed to create event")
+				}
+
 				logger.Error(err, "Failed to fetch topology StorageClass")
 				return
 			}
@@ -460,6 +520,10 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, pod *
 				logger.Info("Update topology StorageClass finalizer...", "name", topologySC.Name)
 
 				if err = r.Client.Update(ctx, topologySC); err != nil {
+					if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to update StorageClass for %s: %s", config.Name, topologySC.Name), err.Error(), pod, config); err != nil {
+						logger.Error(err, "Failed to create event")
+					}
+
 					logger.Error(err, "Failed to update topology StorageClass")
 					return
 				}
@@ -484,6 +548,10 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, pod *
 	logger.Info("Create PVC...")
 
 	if err = r.Create(ctx, pvc); err != nil {
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to create PVC for %s: %s", config.Name, pvc.Name), err.Error(), pod, config); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
 		logger.Error(err, "Failed to create PVC")
 		return
 	}
@@ -501,6 +569,11 @@ WAIT_PV:
 			if waitPVErr == nil {
 				waitPVErr = waitCtx.Err()
 			}
+
+			if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("PV creation wait timeout for %s: %s", config.Name, pvc.Name), waitPVErr.Error(), pod, pvc); err != nil {
+				logger.Error(err, "Failed to create event")
+			}
+
 			logger.Error(waitPVErr, "PV creation wait timeout")
 			return
 		default:
@@ -525,6 +598,11 @@ WAIT_CSI:
 			if waitCSIErr == nil {
 				waitCSIErr = waitCtx.Err()
 			}
+
+			if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("CSI provision wait timeout for %s: %s", config.Name, pv.Name), waitCSIErr.Error(), pod, pv); err != nil {
+				logger.Error(err, "Failed to create event")
+			}
+
 			logger.Error(waitCSIErr, "CSI provision wait timeout")
 			return
 		default:
@@ -539,6 +617,10 @@ WAIT_CSI:
 
 	vaName, err := utils.RenderResourceName(true, config.Name, pvc.Name, pvc.Namespace)
 	if err != nil {
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to render VolumeAttachment name for %s: %s", config.Name, pv.Name), err.Error(), pod, pv); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
 		logger.Error(err, "Failed to render VolumeAttachment name")
 		return
 	}
@@ -567,6 +649,10 @@ WAIT_CSI:
 	logger.Info("Create VolumeAttachment...", "attacher", sc.Provisioner, "node_name", nodeName)
 
 	if err = r.Create(ctx, volumeAttachment); err != nil {
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to create volume attachment for %s: %s", config.Name, pv.Name), err.Error(), pod, pv); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
 		logger.Error(err, "Failed to create volume attachment")
 		return
 	}
@@ -583,6 +669,11 @@ WAIT_CSI:
 				if waitVAErr == nil {
 					waitVAErr = waitCtx.Err()
 				}
+
+				if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("VolumeAttachment wait timeout for %s: %s", config.Name, volumeAttachment.Name), waitVAErr.Error(), pod, volumeAttachment); err != nil {
+					logger.Error(err, "Failed to create event")
+				}
+
 				logger.Error(waitVAErr, "VolumeAttachment wait timeout")
 				return
 			default:
@@ -606,19 +697,27 @@ WAIT_CSI:
 
 	preMountCmd, err := driver.GetPreMountCommand(pv, volumeAttachment)
 	if err != nil {
-		logger.Error(err, "Failed to call GetPreMountCommand")
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to call driver.GetPreMountCommand for %s: %s", config.Name, sc.Provisioner), err.Error(), pod, config); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
+		logger.Error(err, "Failed to call driver", "method", "GetPreMountCommand")
 		return
 	}
 
 	mountpoint := utils.RenderMountPoint(config.Spec.MountPointPattern, config.Name, nextIndex)
 
-	mountJob, err := utils.RenderMountJob(pvc.Name, pvc.Spec.VolumeName, pvc.Namespace, nodeName, pv.Spec.CSI.FSType, mountpoint, containerIDs, preMountCmd, volumeMeta, metav1.OwnerReference{
+	mountJob, err := utils.RenderMountJob(pod.Name, pvc.Name, pvc.Spec.VolumeName, pvc.Namespace, nodeName, pv.Spec.CSI.FSType, mountpoint, containerIDs, preMountCmd, volumeMeta, metav1.OwnerReference{
 		APIVersion: parentPVC.APIVersion,
 		Kind:       parentPVC.Kind,
 		Name:       pvc.Name,
 		UID:        pvc.UID,
 	})
 	if err != nil {
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to render mount Job for %s", config.Name), err.Error(), pod, config); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
 		logger.Error(err, "Unable to render mount job")
 		return
 	}
@@ -626,12 +725,16 @@ WAIT_CSI:
 	logger.Info("Create mount Job...", "containers", containerIDs, "mountpoint", mountpoint)
 
 	if err := r.Create(ctx, mountJob); err != nil {
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to create mount Job for %s", config.Name), err.Error(), pod, config); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
 		logger.Error(err, "Failed to create mount job")
 		return
 	}
 }
 
-func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capacity resource.Quantity, pvc *corev1.PersistentVolumeClaim, nodeName string, logger logr.Logger) {
+func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, pod *corev1.Pod, capacity resource.Quantity, pvc *corev1.PersistentVolumeClaim, nodeName string, logger logr.Logger) {
 	logger.Info("Update PVC...", "capacity", capacity.AsApproximateFloat64())
 
 	pvc.Spec.Resources.Requests[corev1.ResourceStorage] = capacity
@@ -640,21 +743,39 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 	defer cancel()
 
 	if err := r.Update(ctx, pvc); err != nil {
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to update PVC for %s: %s", config.Name, pvc.Name), err.Error(), pod, pvc); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
 		logger.Error(err, "Failed to update PVC")
 		return
 	}
 
 	if _, ok := pvc.Labels["discoblocks-parent"]; !ok {
 		logger.Info("First PVC is managed by CSI driver")
+
+		if err := r.EventService.SendNormal(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("New capacity of %s: %s", pvc.Name, capacity.String()), "Operation finished: disk managed by CSI driver", pod, pvc); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
 		return
 	}
 
 	sc := storagev1.StorageClass{}
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: config.Spec.StorageClassName}, &sc); err != nil {
 		if apierrors.IsNotFound(err) {
+			if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("StorageClass not found for %s: %s", config.Name, config.Spec.StorageClassName), err.Error(), pod, config); err != nil {
+				logger.Error(err, "Failed to create event")
+			}
+
 			logger.Error(err, "StorageClass not found", "sc_name", config.Spec.StorageClassName)
 			return
 		}
+
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to fetch StorageClass for %s: %s", config.Name, config.Spec.StorageClassName), err.Error(), pod, config); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
 		logger.Error(err, "Unable to fetch StorageClass")
 		return
 	}
@@ -662,20 +783,39 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 
 	driver := drivers.GetDriver(sc.Provisioner)
 	if driver == nil {
-		logger.Error(errors.New("driver not found: "+sc.Provisioner), "Driver not found")
+		dmErr := errors.New("driver not found: " + sc.Provisioner)
+
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to find driver for %s: %s", config.Name, sc.Provisioner), dmErr.Error(), pod, config); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
+		logger.Error(dmErr, "Driver not found")
 		return
 	}
 
 	if isFsManaged, err := driver.IsFileSystemManaged(); err != nil {
-		logger.Error(err, "Failed to call IsFileSystemManaged")
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to call driver.IsFileSystemManaged %s: %s", config.Name, sc.Provisioner), err.Error(), pod, config); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
+		logger.Error(err, "Failed to call driver", "method", "IsFileSystemManaged")
 		return
 	} else if isFsManaged {
 		logger.Info("Filesystem will resized by CSI driver")
+
+		if err := r.EventService.SendNormal(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("New capacity of %s: %s", pvc.Name, capacity.String()), "Operation finished: disk resizing by CSI driver", pod, pvc); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
 		return
 	}
 
 	waitForMeta, err := driver.WaitForVolumeAttachmentMeta()
 	if err != nil {
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to call driver.WaitForVolumeAttachmentMeta %s: %s", config.Name, sc.Provisioner), err.Error(), pod, config); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
 		logger.Error(err, "Failed to call driver", "method", "WaitForVolumeAttachmentMeta")
 		return
 	}
@@ -684,9 +824,17 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 
 	pv := &corev1.PersistentVolume{}
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: pvc.Spec.VolumeName}, pv); err != nil {
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to fetch PV for %s: %s", config.Name, pv.Name), err.Error(), pod, config); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
 		logger.Error(err, "Failed to find PersistentVolume")
 		return
 	} else if pv.Spec.CSI == nil {
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to find pv.spec.csi for %s: %s", config.Name, pv.Name), err.Error(), pod, pv); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
 		logger.Error(err, "Failed to find pv.spec.csi")
 		return
 	}
@@ -699,12 +847,20 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 
 		volumeAttachment, err = r.getVolumeAttachment(ctx, pvc.Spec.VolumeName)
 		if err != nil {
+			if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to fetch VolumeAttachment for %s: %s", config.Name, pv.Name), err.Error(), pod, pv); err != nil {
+				logger.Error(err, "Failed to create event")
+			}
+
 			logger.Error(err, "Failed to fetch VolumeAttachment")
 			return
 		}
 
 		volumeMeta = volumeAttachment.Status.AttachmentMetadata[waitForMeta]
 		if volumeMeta == "" {
+			if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to find VolumeAttachment meta for %s: %s", config.Name, pv.Name), err.Error(), pod, pv); err != nil {
+				logger.Error(err, "Failed to create event")
+			}
+
 			logger.Error(err, "Failed to find VolumeAttachment meta")
 			return
 		}
@@ -712,17 +868,25 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 
 	preResizeCmd, err := driver.GetPreResizeCommand(pv, volumeAttachment)
 	if err != nil {
-		logger.Error(err, "Failed to call GetPreResizeCommand")
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to call driver.GetPreResizeCommand for %s: %s", config.Name, sc.Provisioner), err.Error(), pod, config); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
+		logger.Error(err, "Failed to call driver", "method", "GetPreResizeCommand")
 		return
 	}
 
-	resizeJob, err := utils.RenderResizeJob(pvc.Name, pvc.Spec.VolumeName, pvc.Namespace, nodeName, pv.Spec.CSI.FSType, preResizeCmd, volumeMeta, metav1.OwnerReference{
+	resizeJob, err := utils.RenderResizeJob(pod.Name, pvc.Name, pvc.Spec.VolumeName, pvc.Namespace, nodeName, pv.Spec.CSI.FSType, preResizeCmd, volumeMeta, metav1.OwnerReference{
 		APIVersion: pvc.APIVersion,
 		Kind:       pvc.Kind,
 		Name:       pvc.Name,
 		UID:        pvc.UID,
 	})
 	if err != nil {
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to render resize Job for %s", config.Name), err.Error(), pod, config); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
 		logger.Error(err, "Unable to render mount job")
 		return
 	} else if resizeJob == nil {
@@ -732,6 +896,10 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, capac
 	logger.Info("Create resize Job...")
 
 	if err := r.Create(ctx, resizeJob); err != nil {
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to create resize Job for %s", config.Name), err.Error(), pod, config); err != nil {
+			logger.Error(err, "Failed to create event")
+		}
+
 		logger.Error(err, "Failed to create resize job")
 		return
 	}

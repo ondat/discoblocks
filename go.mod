@@ -32,6 +32,7 @@ replace (
 
 require (
 	github.com/go-logr/logr v1.2.3
+	github.com/jellydator/ttlcache/v3 v3.0.0
 	github.com/moby/moby v20.10.18+incompatible
 	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/gomega v1.19.0
