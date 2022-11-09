@@ -6,13 +6,14 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
+	"github.com/ondat/discoblocks/pkg/utils"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/selection"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -22,6 +23,7 @@ import (
 
 // JobReconciler reconciles a Job object
 type JobReconciler struct {
+	EventService utils.EventService
 	client.Client
 	Scheme *runtime.Scheme
 }
@@ -38,8 +40,63 @@ type JobReconciler struct {
 func (r *JobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithName("JobReconciler").WithValues("req_name", req.Name, "namespace", req.Name)
 
-	logger.Info("Reconcile job...")
+	logger.Info("Reconcile Job...")
 	defer logger.Info("Reconciled")
+
+	logger.Info("Fetch Job...")
+
+	job := batchv1.Job{}
+	if err := r.Client.Get(ctx, types.NamespacedName{Name: req.Name, Namespace: req.Namespace}, &job); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, fmt.Errorf("failed to fetch job %s/%s: %w", req.Namespace, req.Name, err)
+		}
+	}
+
+	if job.UID != "" {
+		succeeded := job.Status.Succeeded == 1
+
+		operation, podName, pvcName := job.Annotations["discoblocks/operation"], job.Annotations["discoblocks/pod"], job.Annotations["discoblocks/pvc"]
+		if operation != "" && podName != "" && pvcName != "" {
+			pod := corev1.Pod{}
+			if err := r.Client.Get(ctx, types.NamespacedName{Name: podName, Namespace: req.Namespace}, &pod); err != nil {
+				if !apierrors.IsNotFound(err) {
+					logger.Error(err, "Failed to fetch Pod", "pod_name", podName)
+					return ctrl.Result{}, fmt.Errorf("failed to fetch pod %s/%s: %w", req.Namespace, podName, err)
+				}
+			} else {
+				capacity := "?"
+
+				pvc := &corev1.PersistentVolumeClaim{}
+				if err := r.Client.Get(ctx, types.NamespacedName{Name: pvcName, Namespace: req.Namespace}, pvc); err != nil {
+					if !apierrors.IsNotFound(err) {
+						logger.Error(err, "Failed to fetch PVC", "pvc_name", pvcName)
+						return ctrl.Result{}, fmt.Errorf("failed to fetch PVC %s/%s: %w", req.Namespace, pvcName, err)
+					}
+
+					logger.Error(err, "PVC not found", "pvc_name", pvcName)
+
+					pvc = nil
+				} else {
+					r := pvc.Status.Capacity[corev1.ResourceStorage]
+					capacity = r.String()
+				}
+
+				if succeeded {
+					if err := r.EventService.SendNormal(req.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("New capacity of %s: %s", pvcName, capacity), fmt.Sprintf("Operation finished: %s", operation), &pod, pvc); err != nil {
+						logger.Error(err, "Failed to create event")
+					}
+				} else {
+					if err := r.EventService.SendWarning(req.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to apply new capacity of %s: %s", pvcName, capacity), fmt.Sprintf("Operation finished: %s", operation), &pod, pvc); err != nil {
+						logger.Error(err, "Failed to create event")
+					}
+				}
+			}
+		}
+
+		if !succeeded {
+			return ctrl.Result{}, nil
+		}
+	}
 
 	label, err := labels.NewRequirement("job-name", selection.Equals, []string{req.Name})
 	if err != nil {
@@ -56,7 +113,7 @@ func (r *JobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		LabelSelector: jobSelector,
 	}); err != nil {
 		logger.Info("Failed to list Jobs", "error", err.Error())
-		return ctrl.Result{}, fmt.Errorf("unable to list Jobs: %w", err)
+		return ctrl.Result{}, fmt.Errorf("failed to list Jobs: %w", err)
 	}
 
 	for i := range podList.Items {
@@ -68,20 +125,14 @@ func (r *JobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 			}
 
 			logger.Info("Failed to delete pod", "pod_name", podList.Items[i].Name, "error", err.Error())
-			return ctrl.Result{}, fmt.Errorf("unable to delete pod %s: %w", podList.Items[i].Name, err)
+			return ctrl.Result{}, fmt.Errorf("failed to delete Pod %s/%s: %w", req.Namespace, podList.Items[i].Name, err)
 		}
 	}
 
 	logger.Info("Delete Job...")
 
-	err = r.Client.Delete(ctx, &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      req.Name,
-			Namespace: req.Namespace,
-		},
-	})
-	if !apierrors.IsNotFound(err) {
-		return ctrl.Result{}, err
+	if err = r.Client.Delete(ctx, &job); err != nil && !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("failed to delete Job %s/%s: %w", req.Namespace, job.Name, err)
 	}
 
 	return ctrl.Result{}, nil
@@ -121,7 +172,7 @@ func (ef jobEventFilter) Update(e event.UpdateEvent) bool {
 		return false
 	}
 
-	return newObj.Status.CompletionTime != nil && newObj.Status.Succeeded == 1
+	return newObj.Status.CompletionTime != nil
 }
 
 func (ef jobEventFilter) Generic(_ event.GenericEvent) bool {

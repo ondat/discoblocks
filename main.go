@@ -41,6 +41,7 @@ import (
 	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
 	"github.com/ondat/discoblocks/controllers"
 	"github.com/ondat/discoblocks/mutators"
+	"github.com/ondat/discoblocks/pkg/utils"
 	"github.com/ondat/discoblocks/schedulers"
 	//+kubebuilder:scaffold:imports
 )
@@ -65,6 +66,7 @@ var (
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get
 //+kubebuilder:rbac:groups="",resources=pods,verbs=list;delete
+//+kubebuilder:rbac:groups="events.k8s.io",resources=events,verbs=create
 
 // indirect rbac
 //+kubebuilder:rbac:groups="",resources=namespaces;services;pods;persistentvolumes;replicationcontrollers,verbs=list;watch
@@ -72,6 +74,8 @@ var (
 //+kubebuilder:rbac:groups="apps",resources=replicasets;statefulsets,verbs=list;watch
 //+kubebuilder:rbac:groups="policy",resources=poddisruptionbudgets,verbs=list;watch
 //+kubebuilder:rbac:groups="storage.k8s.io",resources=storageclasses;csinodes;csidrivers;csistoragecapacities,verbs=list;watch
+
+var controllerID = "49ccccaf.discoblocks.ondat.io"
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -105,16 +109,19 @@ func main() {
 		Port:                   webhookport,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "49ccccaf.discoblocks.ondat.io",
+		LeaderElectionID:       controllerID,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
 
+	eventService := utils.NewEventService(controllerID, mgr.GetClient())
+
 	if err = (&controllers.JobReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		EventService: eventService,
+		Client:       mgr.GetClient(),
+		Scheme:       mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Job")
 		os.Exit(1)
@@ -138,10 +145,11 @@ func main() {
 	}
 
 	if _, err = (&controllers.PVCReconciler{
-		NodeCache:  nodeReconciler,
-		InProgress: sync.Map{},
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
+		EventService: eventService,
+		NodeCache:    nodeReconciler,
+		InProgress:   sync.Map{},
+		Client:       mgr.GetClient(),
+		Scheme:       mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "PVC")
 		os.Exit(1)
