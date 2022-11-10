@@ -116,7 +116,7 @@ bundle: manifests kustomize ## Generates Kubernetes manifests
 	cd config/manager && $(KUSTOMIZE) edit set image controller=discoblocks:latest
 
 .PHONY: deploy-cert-manager
-deploy-cert-manager: manifests kustomize ## Deploy cert manager to the K8s cluster specified in ~/.kube/config.
+deploy-cert-manager: ## Deploy cert manager to the K8s cluster specified in ~/.kube/config.
 	kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.8.0/cert-manager.yaml
 
 .PHONY: undeploy-cert-manager
