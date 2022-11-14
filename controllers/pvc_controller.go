@@ -89,14 +89,14 @@ func (r *PVCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	defer cancel()
 
 	pvc := corev1.PersistentVolumeClaim{}
-	err := r.Get(ctx, req.NamespacedName, &pvc)
-	switch {
-	case err != nil && apierrors.IsNotFound(err):
+	if err := r.Get(ctx, req.NamespacedName, &pvc); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, fmt.Errorf("unable to fetch PVC: %w", err)
+		}
+
 		logger.Info("PVC not found")
 
 		return ctrl.Result{}, nil
-	case err != nil:
-		return ctrl.Result{}, fmt.Errorf("unable to fetch PVC: %w", err)
 	}
 
 	logger.Info("Fetch DiskConfig...")
@@ -104,7 +104,7 @@ func (r *PVCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	config := discoblocksondatiov1.DiskConfig{}
 	if err := r.Client.Get(ctx, types.NamespacedName{Namespace: pvc.Namespace, Name: pvc.Labels["discoblocks"]}, &config); err != nil {
 		if apierrors.IsNotFound(err) {
-			logger.Info("PVC not found")
+			logger.Info("DiskConfig not found")
 
 			return ctrl.Result{}, nil
 		}
@@ -114,18 +114,64 @@ func (r *PVCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	}
 	logger = logger.WithValues("dc_name", config.Name)
 
+	reason := "PvcPhaseHasChanged"
+
 	if pvc.DeletionTimestamp != nil {
-		if _, ok := config.Status.PersistentVolumeClaims[pvc.Name]; ok {
-			logger.Info("Remove status")
-			delete(config.Status.PersistentVolumeClaims, pvc.Name)
+		toDelete := []int{}
+
+		for i := range config.Status.Conditions {
+			if config.Status.Conditions[i].Reason != reason ||
+				config.Status.Conditions[i].Message != pvc.Name {
+				continue
+			}
+
+			toDelete = append(toDelete, i)
+		}
+
+		sort.Ints(toDelete)
+
+		for i, d := range toDelete {
+			d -= i
+
+			config.Status.Conditions = append(config.Status.Conditions[:d], config.Status.Conditions[d+1:]...)
 		}
 	} else {
-		if config.Status.PersistentVolumeClaims == nil {
-			config.Status.PersistentVolumeClaims = map[string]corev1.PersistentVolumeClaimPhase{}
+		if config.Status.Conditions == nil {
+			config.Status.Conditions = []metav1.Condition{}
+		}
+
+		toUpdate := -1
+		for i := range config.Status.Conditions {
+			if config.Status.Conditions[i].Reason != reason ||
+				config.Status.Conditions[i].Message != pvc.Name {
+				continue
+			}
+
+			toUpdate = i
+			break
 		}
 
 		logger.Info("Add status", "phase", pvc.Status.Phase)
-		config.Status.PersistentVolumeClaims[pvc.Name] = pvc.Status.Phase
+
+		status := metav1.ConditionFalse
+		if pvc.Status.Phase == corev1.ClaimBound {
+			status = metav1.ConditionTrue
+		}
+
+		condition := metav1.Condition{
+			Status:             status,
+			Type:               string(pvc.Status.Phase),
+			ObservedGeneration: pvc.Generation,
+			LastTransitionTime: metav1.NewTime(time.Now()),
+			Reason:             reason,
+			Message:            pvc.Name,
+		}
+
+		if toUpdate == -1 {
+			config.Status.Conditions = append(config.Status.Conditions, condition)
+		} else {
+			config.Status.Conditions[toUpdate] = condition
+		}
 	}
 
 	logger.Info("Update DiskConfig status...")
@@ -734,6 +780,7 @@ WAIT_CSI:
 	}
 }
 
+//nolint:gocyclo // It is complex we know
 func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, pod *corev1.Pod, capacity resource.Quantity, pvc *corev1.PersistentVolumeClaim, nodeName string, logger logr.Logger) {
 	logger.Info("Update PVC...", "capacity", capacity.AsApproximateFloat64())
 
@@ -964,9 +1011,7 @@ func (ef pvcEventFilter) Update(e event.UpdateEvent) bool {
 		return false
 	}
 
-	return oldObj.DeletionTimestamp != nil ||
-		newObj.DeletionTimestamp != nil ||
-		oldObj.Status.Phase != newObj.Status.Phase
+	return oldObj.Status.Phase != newObj.Status.Phase || newObj.DeletionTimestamp != nil
 }
 
 func (ef pvcEventFilter) Generic(_ event.GenericEvent) bool {
