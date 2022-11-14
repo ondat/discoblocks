@@ -111,24 +111,9 @@ type DiskConfigStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Phase is the phase of the Discoblocks provisioning.
-	Phase Phase `json:"phase,omitempty" yaml:"phase,omitempty"`
-
 	// Conditions is a list of status of all the disks.
 	Conditions []metav1.Condition `json:"conditions,omitempty" yaml:"conditions,omitempty"`
-
-	// PersistentVolumeClaims statuses.
-	PersistentVolumeClaims map[string]corev1.PersistentVolumeClaimPhase `json:"pvcs,omitempty" yaml:"pvcs,omitempty"`
 }
-
-// +kubebuilder:validation:Enum=Ready;Running;Deleting
-type Phase string
-
-const (
-	Ready    Phase = "Ready"
-	Running  Phase = "Running"
-	Deleting Phase = "Deleting"
-)
 
 // +kubebuilder:validation:Enum=ReadWriteSame;ReadWriteOnce;ReadWriteDaemon
 type AvailabilityMode string

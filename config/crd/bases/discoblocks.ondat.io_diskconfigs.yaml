@@ -243,18 +243,6 @@ spec:
                   - type
                   type: object
                 type: array
-              phase:
-                description: Phase is the phase of the Discoblocks provisioning.
-                enum:
-                - Ready
-                - Running
-                - Deleting
-                type: string
-              pvcs:
-                additionalProperties:
-                  type: string
-                description: PersistentVolumeClaims statuses.
-                type: object
             type: object
         type: object
     served: true
