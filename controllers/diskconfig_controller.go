@@ -86,44 +86,26 @@ func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	case err != nil && apierrors.IsNotFound(err):
 		logger.Info("DiskConfig not found")
 
-		return r.reconcileDelete(ctx, req.Name, req.Namespace, logger.WithValues("mode", "delete"))
+		return ctrl.Result{}, nil
 	case err != nil:
 		return ctrl.Result{}, fmt.Errorf("unable to fetch DiskConfig: %w", err)
 	case config.DeletionTimestamp != nil:
 		logger.Info("DiskConfig delete in progress")
 
-		logger.Info("Update phase to Deleting...")
-
-		config.Status.Phase = discoblocksondatiov1.Deleting
-		if err = r.Client.Status().Update(ctx, &config); err != nil {
-			logger.Info("Unable to update DiskConfig status", "error", err.Error())
-			return ctrl.Result{}, fmt.Errorf("unable to update DiskConfig status: %w", err)
-		}
-
-		return ctrl.Result{RequeueAfter: time.Second}, nil
+		return r.reconcileDelete(ctx, req.Name, req.Namespace, logger.WithValues("mode", "delete"))
 	}
 
 	logger.Info("Update phase to Running...")
 
-	config.Status.Phase = discoblocksondatiov1.Running
-	if err = r.Client.Status().Update(ctx, &config); err != nil {
-		logger.Info("Unable to update DiskConfig status", "error", err.Error())
-		return ctrl.Result{}, fmt.Errorf("unable to update DiskConfig status: %w", err)
-	}
-
 	var result ctrl.Result
 	result, err = r.reconcileUpdate(ctx, &config, logger.WithValues("mode", "update"))
-	if err == nil {
-		logger.Info("Update phase to Ready...")
+	if err != nil {
+		logger.Info("Failed to reconcile update", "error", err)
 
-		config.Status.Phase = discoblocksondatiov1.Ready
-		if err = r.Client.Status().Update(ctx, &config); err != nil {
-			logger.Info("Unable to update DiskConfig status", "error", err.Error())
-			return ctrl.Result{}, fmt.Errorf("unable to update DiskConfig status: %w", err)
-		}
+		return result, err
 	}
 
-	return result, err
+	return result, nil
 }
 
 func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, configNamespace string, logger logr.Logger) (ctrl.Result, error) {
