@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/ondat/discoblocks/pkg/drivers"
+	"github.com/ondat/discoblocks/pkg/metrics"
 	"golang.org/x/net/context"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -121,6 +122,8 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 
 	sc := storagev1.StorageClass{}
 	if err := diskConfigWebhookDependencies.client.Get(ctx, types.NamespacedName{Name: r.Spec.StorageClassName}, &sc); err != nil {
+		metrics.NewError("StorageClass", r.Spec.StorageClassName, "", "Kube API", "get")
+
 		if apierrors.IsNotFound(err) {
 			logger.Info("StorageClass not found")
 		} else {
@@ -137,12 +140,16 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 
 	driver := drivers.GetDriver(sc.Provisioner)
 	if driver == nil {
+		metrics.NewError("CSI", sc.Provisioner, "", sc.Provisioner, "GetDriver")
+
 		logger.Info("Driver not found")
 		return errors.New("driver not found")
 	}
 
 	valid, err := driver.IsStorageClassValid(&sc)
 	if err != nil {
+		metrics.NewError("CSI", sc.Name, "", sc.Provisioner, "IsStorageClassValid")
+
 		logger.Error(err, "Failed to call driver", "method", "IsStorageClassValid")
 		return fmt.Errorf("failed to call driver: %w", err)
 	} else if !valid {

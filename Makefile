@@ -19,6 +19,8 @@ LDF_FLAGS = -X github.com/ondat/discoblocks/pkg/drivers.DriversDir=$(PWD)/driver
 SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
+$(shell mkdir -p bin)
+
 .PHONY: all
 all: build
 
@@ -114,6 +116,19 @@ bundle: manifests kustomize ## Generates Kubernetes manifests
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default > discoblocks-bundle.yaml
 	cd config/manager && $(KUSTOMIZE) edit set image controller=discoblocks:latest
+
+.PHONY: deploy-prometheus
+deploy-prometheus: ## Deploy prometheus to the K8s cluster specified in ~/.kube/config.
+	(cd bin && rm -rf kube-prometheus && git clone https://github.com/prometheus-operator/kube-prometheus.git)
+	kubectl create -f bin/kube-prometheus/manifests/setup
+	until kubectl get servicemonitors --all-namespaces; do sleep 1; done
+	kubectl create -f bin/kube-prometheus/manifests
+	rm -rf bin/kube-prometheus
+
+.PHONY: undeploy-cert-prometheus
+undeploy-prometheus: ## Undeploy prometheus from the K8s cluster specified in ~/.kube/config.
+	kubectl delete -f bin/kube-prometheus/manifests
+	kubectl delete -f bin/kube-prometheus/manifests/setup
 
 .PHONY: deploy-cert-manager
 deploy-cert-manager: ## Deploy cert manager to the K8s cluster specified in ~/.kube/config.

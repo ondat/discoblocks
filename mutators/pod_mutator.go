@@ -14,6 +14,7 @@ import (
 	"github.com/moby/moby/pkg/namesgenerator"
 	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
 	"github.com/ondat/discoblocks/pkg/drivers"
+	"github.com/ondat/discoblocks/pkg/metrics"
 	"github.com/ondat/discoblocks/pkg/utils"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -50,6 +51,8 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 	pod := corev1.Pod{}
 	if err := a.decoder.DecodeRaw(req.Object, &pod); err != nil {
+		metrics.NewError("Pod", req.Name, req.Namespace, "Kube API", "decode")
+
 		logger.Info("Unable to decode request", "error", err.Error())
 		return admission.Errored(http.StatusBadRequest, fmt.Errorf("unable to decode request: %w", err))
 	}
@@ -67,6 +70,8 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 	if err := a.Client.List(ctx, &diskConfigs, &client.ListOptions{
 		Namespace: pod.Namespace,
 	}); err != nil {
+		metrics.NewError("DiskConfig", "", pod.Namespace, "Kube API", "list")
+
 		logger.Info("Unable to fetch DiskConfigs", "error", err.Error())
 		return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to fetch DiskConfigs: %w", err))
 	}
@@ -150,6 +155,8 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 		sc := storagev1.StorageClass{}
 		if err := a.Client.Get(ctx, types.NamespacedName{Name: config.Spec.StorageClassName}, &sc); err != nil {
+			metrics.NewError("StorageClass", config.Spec.StorageClassName, "", "Kube API", "get")
+
 			if apierrors.IsNotFound(err) {
 				logger.Info("StorageClass not found", "name", config.Spec.StorageClassName)
 				return admission.Errored(http.StatusNotFound, err)
@@ -161,6 +168,8 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 		driver := drivers.GetDriver(sc.Provisioner)
 		if driver == nil {
+			metrics.NewError("CSI", sc.Provisioner, "", sc.Provisioner, "GetDriver")
+
 			msg := fmt.Sprintf("Driver not found: %s", sc.Provisioner)
 			logger.Info(msg)
 			return errorMode(http.StatusInternalServerError, msg, fmt.Errorf("driver not found: %s", sc.Provisioner))
@@ -170,14 +179,24 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 		prefix := utils.GetNamePrefix(config.Spec.AvailabilityMode, string(config.UID), nodeName)
 
-		var pvc *corev1.PersistentVolumeClaim
-		pvc, err := utils.NewPVC(&config, prefix, driver)
+		pvcName, err := utils.RenderResourceName(true, prefix, config.Name, config.Namespace)
 		if err != nil {
-			msg := fmt.Sprintf("Failed to get NewPVC: %s", err.Error())
+			msg := "Failed to render PersistentVolumeClaim name"
 			logger.Error(err, msg)
-			return errorMode(http.StatusInternalServerError, msg, fmt.Errorf("failed to get NewPVC: %s", err.Error()))
+			return errorMode(http.StatusInternalServerError, msg, fmt.Errorf("failed to render PersistentVolumeClaim name: %s", err.Error()))
+		}
+
+		pvc, err := driver.GetPVCStub(pvcName, config.Namespace, config.Spec.StorageClassName)
+		if err != nil {
+			metrics.NewError("CSI", pvcName, "", sc.Provisioner, "GetPVCStub")
+
+			msg := fmt.Sprintf("Failed to get GetPVCStub: %s", err.Error())
+			logger.Info(msg)
+			return errorMode(http.StatusInternalServerError, msg, fmt.Errorf("failed to get GetPVCStub: %s", err.Error()))
 		}
 		logger = logger.WithValues("pvc_name", pvc.Name)
+
+		utils.PVCDecorator(&config, prefix, driver, pvc)
 
 		pvcNamesWithMount := map[string]string{
 			pvc.Name: utils.RenderMountPoint(config.Spec.MountPointPattern, pvc.Name, 0),
@@ -189,11 +208,15 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 				node := &corev1.Node{}
 				if err := a.Client.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
+					metrics.NewError("Node", nodeName, "", "Kube API", "get")
+
 					return admission.Errored(http.StatusInternalServerError, err)
 				}
 
 				scAllowedTopology, err := driver.GetStorageClassAllowedTopology(node)
 				if err != nil {
+					metrics.NewError("CSI", node.Name, "", sc.Provisioner, "GetStorageClassAllowedTopology")
+
 					msg := fmt.Sprintf("Failed to get GetStorageClassAllowedTopology: %s", err.Error())
 					logger.Info(msg)
 					return errorMode(http.StatusInternalServerError, msg, fmt.Errorf("failed to get GetStorageClassAllowedTopology: %s", err.Error()))
@@ -209,10 +232,10 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 					logger.Info("Create StorageClass...")
 
-					if err = a.Client.Create(ctx, topologySC); err != nil {
-						if !apierrors.IsAlreadyExists(err) {
-							return admission.Errored(http.StatusInternalServerError, err)
-						}
+					if err = a.Client.Create(ctx, topologySC); err != nil && !apierrors.IsAlreadyExists(err) {
+						metrics.NewError("StorageClass", topologySC.Name, "", "Kube API", "create")
+
+						return admission.Errored(http.StatusInternalServerError, err)
 					}
 
 					pvc.Spec.StorageClassName = &topologySC.Name
@@ -223,6 +246,8 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 			if err = a.Client.Create(ctx, pvc); err != nil {
 				if !apierrors.IsAlreadyExists(err) {
+					metrics.NewError("PersistentVolume", pvc.Name, pvc.Namespace, "Kube API", "create")
+
 					logger.Info("Failed to create PVC", "error", err.Error())
 					return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to create PVC: %w", err))
 				}
@@ -234,6 +259,8 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 				logger.Info("Fetch PVC...")
 
 				if err = a.Client.Get(ctx, types.NamespacedName{Name: pvc.Name, Namespace: pvc.Namespace}, pvc); err != nil {
+					metrics.NewError("PersistentVolumeClaim", pvc.Name, pvc.Namespace, "Kube API", "get")
+
 					logger.Error(err, "Unable to fetch PVC", "name", pvc.Name)
 					return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to fetch PVC %s: %w", pvc.Name, err))
 				}
@@ -244,6 +271,8 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 					logger.Info("Update PVC finalizer...", "name", pvc.Name)
 
 					if err = a.Client.Update(ctx, pvc); err != nil {
+						metrics.NewError("PersistentVolumeClaim", pvc.Name, pvc.Namespace, "Kube API", "update")
+
 						logger.Error(err, "Unable to update PVC finalizer", "name", pvc.Name)
 						return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to update PVC finalizer %s: %w", pvc.Name, err))
 					}
@@ -265,6 +294,8 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 						Namespace:     config.Namespace,
 						LabelSelector: pvcSelector,
 					}); err != nil {
+						metrics.NewError("PersistentVolumeClaim", "", config.Namespace, "Kube API", "list")
+
 						logger.Error(err, "Unable to fetch PVCs")
 						return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to fetch PVCs: %w", err))
 					}
@@ -284,6 +315,8 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 							logger.Info("Update PVC child finalizer...", "name", pvcs.Items[i].Name)
 
 							if err = a.Client.Update(ctx, &pvcs.Items[i]); err != nil {
+								metrics.NewError("PersistentVolumeClaim", pvcs.Items[i].Name, pvcs.Items[i].Namespace, "Kube API", "update")
+
 								logger.Error(err, "Unable to update PVC finalizer", "name", pvcs.Items[i].Name)
 								return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to update PVC finalizer %s: %w", pvcs.Items[i].Name, err))
 							}
@@ -297,10 +330,15 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 						index, err := strconv.Atoi(pvcs.Items[i].Labels["discoblocks-index"])
 						if err != nil {
+							metrics.NewError("PersistentVolumeClaim", pvcs.Items[i].Name, pvcs.Items[i].Namespace, "DiscoBlocks", "")
+
 							msg := fmt.Sprintf("Unable to convert index: %s", pvcs.Items[i].Labels["discoblocks-index"])
 							logger.Error(err, msg)
 							return errorMode(http.StatusInternalServerError, msg, fmt.Errorf("unable to convert index: %w", err))
 						}
+
+						c := pvcs.Items[i].Spec.Resources.Requests[corev1.ResourceStorage]
+						metrics.NewPVCOperation(pvcs.Items[i].Name, pvcs.Items[i].Namespace, "reuse", c.String())
 
 						pvcNamesWithMount[pvcs.Items[i].Name] = utils.RenderMountPoint(config.Spec.MountPointPattern, pvcs.Items[i].Name, index)
 
@@ -308,6 +346,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 					}
 				}
 			}
+			metrics.NewPVCOperation(pvc.Name, pvc.Namespace, "create", config.Spec.Capacity.String())
 		}
 
 		for pvcName, mountpoint := range pvcNamesWithMount {
@@ -383,6 +422,8 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 	marshaledPod, err := json.Marshal(pod)
 	if err != nil {
+		metrics.NewError("Pod", pod.Name, pod.Namespace, "DiscoBlocks", "marshal")
+
 		logger.Error(err, "Unable to marshal pod")
 		return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to marshal pod: %w", err))
 	}

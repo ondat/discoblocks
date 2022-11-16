@@ -29,6 +29,7 @@ import (
 	"github.com/go-logr/logr"
 	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
 	"github.com/ondat/discoblocks/pkg/drivers"
+	"github.com/ondat/discoblocks/pkg/metrics"
 	"github.com/ondat/discoblocks/pkg/utils"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -91,6 +92,8 @@ func (r *PVCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	pvc := corev1.PersistentVolumeClaim{}
 	if err := r.Get(ctx, req.NamespacedName, &pvc); err != nil {
 		if !apierrors.IsNotFound(err) {
+			metrics.NewError("PersistentVolumeClaim", req.Name, req.Namespace, "Kube API", "get")
+
 			return ctrl.Result{}, fmt.Errorf("unable to fetch PVC: %w", err)
 		}
 
@@ -108,6 +111,8 @@ func (r *PVCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 
 			return ctrl.Result{}, nil
 		}
+
+		metrics.NewError("DiskConfig", pvc.Labels["discoblocks"], pvc.Namespace, "Kube API", "get")
 
 		logger.Info("Unable to fetch PVC", "error", err.Error())
 		return ctrl.Result{}, errors.New("unable to fetch PVC")
@@ -177,6 +182,8 @@ func (r *PVCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	logger.Info("Update DiskConfig status...")
 
 	if err := r.Client.Status().Update(ctx, &config); err != nil {
+		metrics.NewError("DiskConfig", config.Name, config.Namespace, "Kube API", "update")
+
 		logger.Info("Unable to update PVC status", "error", err.Error())
 		return ctrl.Result{}, errors.New("unable to update PVC status")
 	}
@@ -201,6 +208,8 @@ func (r *PVCReconciler) MonitorVolumes() {
 
 	diskConfigs := discoblocksondatiov1.DiskConfigList{}
 	if err := r.Client.List(ctx, &diskConfigs); err != nil {
+		metrics.NewError("DiskConfig", "", "", "Kube API", "list")
+
 		logger.Error(err, "Unable to fetch DiskConfigs")
 		return
 	}
@@ -235,6 +244,8 @@ func (r *PVCReconciler) MonitorVolumes() {
 			Namespace:     config.Namespace,
 			LabelSelector: pvcSelector,
 		}); err != nil {
+			metrics.NewError("PersistentVolumeClaim", "", config.Namespace, "Kube API", "list")
+
 			logger.Error(err, "Unable to fetch PVCs")
 			continue
 		}
@@ -271,6 +282,8 @@ func (r *PVCReconciler) MonitorVolumes() {
 			Namespace:     config.Namespace,
 			LabelSelector: podSelector,
 		}); err != nil {
+			metrics.NewError("Pod", "", config.Namespace, "Kube API", "list")
+
 			logger.Error(err, "Unable to fetch Pods")
 			continue
 		}
@@ -292,6 +305,8 @@ func (r *PVCReconciler) MonitorVolumes() {
 
 				unlock, err := utils.WaitForSemaphore(ctx, sem)
 				if err != nil {
+					metrics.NewError("VolumeMonitor", "", "", "DiscoBlocks", "semaphore")
+
 					logger.Info("Context deadline")
 					return
 				}
@@ -303,11 +318,16 @@ func (r *PVCReconciler) MonitorVolumes() {
 
 				diskInfo, err := utils.FetchDiskInfo(fmt.Sprintf("%s:9100", pod.Status.PodIP))
 				if err != nil {
+					metrics.NewError("Pod", pod.Name, pod.Namespace, "DiscoBlocks", "metrics")
+
+					logger.Error(err, "Unable to fetch disk info")
+
 					if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", "Failed to fetch disk info", err.Error(), &pod, nil); err != nil {
+						metrics.NewError("Event", "", "", "Kube API", "create")
+
 						logger.Error(err, "Failed to create event")
 					}
 
-					logger.Error(err, "Unable to fetch disk info")
 					return
 				}
 
@@ -350,11 +370,16 @@ func (r *PVCReconciler) MonitorVolumes() {
 					if lastIndex, ok := lastPVC.Labels["discoblocks-index"]; ok {
 						actIndex, err = strconv.Atoi(lastIndex)
 						if err != nil {
+							metrics.NewError("Pod", pod.Name, pod.Namespace, "DiscoBlocks", "lastindex")
+
+							logger.Error(err, "Unable to convert index")
+
 							if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to convert last index of %s: %s", lastPVC.Name, lastIndex), err.Error(), &pod, nil); err != nil {
+								metrics.NewError("Event", "", "", "Kube API", "create")
+
 								logger.Error(err, "Failed to create event")
 							}
 
-							logger.Error(err, "Unable to convert index")
 							continue
 						}
 					}
@@ -365,11 +390,16 @@ func (r *PVCReconciler) MonitorVolumes() {
 
 					lastUsed, ok := diskInfo[lastMountPoint]
 					if !ok {
+						metrics.NewError("Pod", pod.Name, pod.Namespace, "DiscoBlocks", "last_mount_point")
+
+						logger.Error(err, "Unable to find metrics", "disk_info", diskInfo)
+
 						if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to find metrics of %s: %s", lastPVC.Name, lastMountPoint), err.Error(), &pod, nil); err != nil {
+							metrics.NewError("Event", "", "", "Kube API", "create")
+
 							logger.Error(err, "Failed to create event")
 						}
 
-						logger.Error(err, "Unable to find metrics", "disk_info", diskInfo)
 						continue
 					}
 
@@ -389,11 +419,16 @@ func (r *PVCReconciler) MonitorVolumes() {
 
 					nodeName := r.NodeCache.GetNodesByIP()[pod.Status.HostIP]
 					if nodeName == "" {
+						metrics.NewError("Node", pod.Status.HostIP, "", "DiscoBlocks", "cache")
+
+						logger.Error(errors.New("node not found: "+pod.Status.HostIP), "Node not found", "IP", pod.Status.HostIP)
+
 						if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Node not found for %s: %s", lastPVC.Name, pod.Status.HostIP), err.Error(), &pod, nil); err != nil {
+							metrics.NewError("Event", "", "", "Kube API", "create")
+
 							logger.Error(err, "Failed to create event")
 						}
 
-						logger.Error(errors.New("node not found: "+pod.Status.HostIP), "Node not found", "IP", pod.Status.HostIP)
 						continue
 					}
 
@@ -451,19 +486,27 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, pod *
 	sc := storagev1.StorageClass{}
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: config.Spec.StorageClassName}, &sc); err != nil {
 		if apierrors.IsNotFound(err) {
+			metrics.NewError("StorageClass", config.Spec.StorageClassName, "", "Kube API", "get")
+
+			logger.Error(err, "StorageClass not found", "sc_name", config.Spec.StorageClassName)
+
 			if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("StorageClass not found for %s: %s", config.Name, config.Spec.StorageClassName), err.Error(), pod, config); err != nil {
+				metrics.NewError("Event", "", "", "Kube API", "create")
+
 				logger.Error(err, "Failed to create event")
 			}
 
-			logger.Error(err, "StorageClass not found", "sc_name", config.Spec.StorageClassName)
 			return
 		}
 
+		logger.Error(err, "Unable to fetch StorageClass")
+
 		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to fetch StorageClass for %s: %s", config.Name, config.Spec.StorageClassName), err.Error(), pod, config); err != nil {
+			metrics.NewError("Event", "", "", "Kube API", "create")
+
 			logger.Error(err, "Failed to create event")
 		}
 
-		logger.Error(err, "Unable to fetch StorageClass")
 		return
 	}
 	logger = logger.WithValues("provisioner", sc.Provisioner)
@@ -472,90 +515,136 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, pod *
 
 	node := &corev1.Node{}
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
+		metrics.NewError("Node", nodeName, "", "Kube API", "get")
+
+		logger.Error(err, "Failed to get Node")
+
 		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to fetch Node for %s: %s", config.Name, nodeName), err.Error(), pod, config); err != nil {
+			metrics.NewError("Event", "", "", "Kube API", "create")
+
 			logger.Error(err, "Failed to create event")
 		}
 
-		logger.Error(err, "Failed to get Node")
 		return
 	}
 
 	driver := drivers.GetDriver(sc.Provisioner)
 	if driver == nil {
+		metrics.NewError("CSI", sc.Provisioner, "", sc.Provisioner, "GetDriver")
+
 		dmErr := errors.New("driver not found: " + sc.Provisioner)
 
+		logger.Error(dmErr, "Driver not found")
+
 		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to find driver for %s: %s", config.Name, sc.Provisioner), dmErr.Error(), pod, config); err != nil {
+			metrics.NewError("Event", "", "", "Kube API", "create")
+
 			logger.Error(err, "Failed to create event")
 		}
 
-		logger.Error(dmErr, "Driver not found")
 		return
 	}
 
 	prefix := utils.GetNamePrefix(discoblocksondatiov1.ReadWriteOnce, string(config.UID), nodeName)
 
-	pvc, err := utils.NewPVC(config, prefix, driver)
+	pvcName, err := utils.RenderResourceName(true, prefix, config.Name, config.Namespace)
 	if err != nil {
-		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to create new PVC for %s", config.Name), err.Error(), pod, config); err != nil {
+		logger.Error(err, "Failed to render PersistentVolumeClaim name")
+		return
+	}
+
+	pvc, err := driver.GetPVCStub(pvcName, config.Namespace, config.Spec.StorageClassName)
+	if err != nil {
+		metrics.NewError("CSI", pvcName, "", sc.Provisioner, "GetPVCStub")
+
+		logger.Error(err, "Failed to call driver", "method", "GetPVCStub")
+
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to call driver.GetPVCStub for %s: %s", config.Name, sc.Provisioner), err.Error(), pod, config); err != nil {
+			metrics.NewError("Event", "", "", "Kube API", "create")
+
 			logger.Error(err, "Failed to create event")
 		}
 
-		logger.Error(err, "Unable to construct new PVC")
 		return
 	}
 	logger = logger.WithValues("pvc_name", pvc.Name)
 
+	utils.PVCDecorator(config, prefix, driver, pvc)
+
 	scAllowedTopology, err := driver.GetStorageClassAllowedTopology(node)
 	if err != nil {
+		metrics.NewError("CSI", node.Name, "", sc.Provisioner, "GetStorageClassAllowedTopology")
+
+		logger.Error(err, "Failed to call driver", "method", "GetStorageClassAllowedTopology")
+
 		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to call driver.GetStorageClassAllowedTopology for %s: %s", config.Name, sc.Provisioner), err.Error(), pod, config); err != nil {
+			metrics.NewError("Event", "", "", "Kube API", "create")
+
 			logger.Error(err, "Failed to create event")
 		}
 
-		logger.Error(err, "Failed to call driver", "method", "GetStorageClassAllowedTopology")
 		return
 	}
 
 	waitForMeta, err := driver.WaitForVolumeAttachmentMeta()
 	if err != nil {
+		metrics.NewError("CSI", "", "", sc.Provisioner, "WaitForVolumeAttachmentMeta")
+
+		logger.Error(err, "Failed to call driver", "method", "WaitForVolumeAttachmentMeta")
+
 		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to call driver.WaitForVolumeAttachmentMeta %s: %s", config.Name, sc.Provisioner), err.Error(), pod, config); err != nil {
+			metrics.NewError("Event", "", "", "Kube API", "create")
+
 			logger.Error(err, "Failed to create event")
 		}
 
-		logger.Error(err, "Failed to call driver", "method", "WaitForVolumeAttachmentMeta")
 		return
 	}
 
 	if len(scAllowedTopology) != 0 {
 		topologySC, err := utils.NewStorageClass(&sc, scAllowedTopology)
 		if err != nil {
+			logger.Error(err, "Failed to render get NewStorageClass")
+
 			if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to create new StorageClass for %s", config.Name), err.Error(), pod, config); err != nil {
+				metrics.NewError("Event", "", "", "Kube API", "create")
+
 				logger.Error(err, "Failed to create event")
 			}
 
-			logger.Error(err, "Failed to render get NewStorageClass")
 			return
 		}
 
 		logger.Info("Create StorageClass...")
 
-		if err = r.Create(ctx, topologySC); err != nil {
+		if err = r.Client.Create(ctx, topologySC); err != nil {
 			if !apierrors.IsAlreadyExists(err) {
+				metrics.NewError("StorageClass", topologySC.Name, "", "Kube API", "create")
+
+				logger.Error(err, "Failed to create topology StorageClass")
+
 				if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to create StorageClass for %s: %s", config.Name, topologySC.Name), err.Error(), pod, config); err != nil {
+					metrics.NewError("Event", "", "", "Kube API", "create")
+
 					logger.Error(err, "Failed to create event")
 				}
 
-				logger.Error(err, "Failed to create topology StorageClass")
 				return
 			}
 
 			logger.Info("Fetch topology StorageClass...")
 
 			if err = r.Client.Get(ctx, types.NamespacedName{Name: topologySC.Name}, topologySC); err != nil {
+				metrics.NewError("StorageClass", topologySC.Name, "", "Kube API", "get")
+
+				logger.Error(err, "Failed to fetch topology StorageClass")
+
 				if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to fetch StorageClass for %s: %s", config.Name, topologySC.Name), err.Error(), pod, config); err != nil {
+					metrics.NewError("Event", "", "", "Kube API", "create")
+
 					logger.Error(err, "Failed to create event")
 				}
 
-				logger.Error(err, "Failed to fetch topology StorageClass")
 				return
 			}
 
@@ -566,11 +655,16 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, pod *
 				logger.Info("Update topology StorageClass finalizer...", "name", topologySC.Name)
 
 				if err = r.Client.Update(ctx, topologySC); err != nil {
+					metrics.NewError("StorageClass", topologySC.Name, "", "Kube API", "update")
+
+					logger.Error(err, "Failed to update topology StorageClass")
+
 					if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to update StorageClass for %s: %s", config.Name, topologySC.Name), err.Error(), pod, config); err != nil {
+						metrics.NewError("Event", "", "", "Kube API", "create")
+
 						logger.Error(err, "Failed to create event")
 					}
 
-					logger.Error(err, "Failed to update topology StorageClass")
 					return
 				}
 			}
@@ -593,14 +687,20 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, pod *
 
 	logger.Info("Create PVC...")
 
-	if err = r.Create(ctx, pvc); err != nil {
+	if err = r.Client.Create(ctx, pvc); err != nil {
+		metrics.NewError("PersistentVolume", pvc.Name, pvc.Namespace, "Kube API", "create")
+
+		logger.Error(err, "Failed to create PVC")
+
 		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to create PVC for %s: %s", config.Name, pvc.Name), err.Error(), pod, config); err != nil {
+			metrics.NewError("Event", "", "", "Kube API", "create")
+
 			logger.Error(err, "Failed to create event")
 		}
 
-		logger.Error(err, "Failed to create PVC")
 		return
 	}
+	metrics.NewPVCOperation(pvc.Name, pvc.Namespace, "create", config.Spec.Capacity.String())
 
 	waitCtx, cancel := context.WithTimeout(context.Background(), config.Spec.Policy.CoolDown.Duration)
 	defer cancel()
@@ -612,18 +712,23 @@ WAIT_PV:
 	for {
 		select {
 		case <-waitCtx.Done():
+			metrics.NewError("PersistentVolume", pvc.Name, pvc.Namespace, "Kube API", "get")
+
 			if waitPVErr == nil {
 				waitPVErr = waitCtx.Err()
 			}
 
+			logger.Error(waitPVErr, "PV creation wait timeout")
+
 			if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("PV creation wait timeout for %s: %s", config.Name, pvc.Name), waitPVErr.Error(), pod, pvc); err != nil {
+				metrics.NewError("Event", "", "", "Kube API", "create")
+
 				logger.Error(err, "Failed to create event")
 			}
 
-			logger.Error(waitPVErr, "PV creation wait timeout")
 			return
 		default:
-			if waitPVErr = r.Get(ctx, types.NamespacedName{Namespace: pvc.Namespace, Name: pvc.Name}, pvc); waitPVErr == nil &&
+			if waitPVErr = r.Client.Get(ctx, types.NamespacedName{Namespace: pvc.Namespace, Name: pvc.Name}, pvc); waitPVErr == nil &&
 				pvc.Spec.VolumeName != "" {
 				break WAIT_PV
 			}
@@ -641,15 +746,20 @@ WAIT_CSI:
 	for {
 		select {
 		case <-waitCtx.Done():
+			metrics.NewError("PersistentVolume", pvc.Spec.VolumeName, "", "Kube API", "get")
+
 			if waitCSIErr == nil {
 				waitCSIErr = waitCtx.Err()
 			}
 
+			logger.Error(waitCSIErr, "CSI provision wait timeout")
+
 			if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("CSI provision wait timeout for %s: %s", config.Name, pv.Name), waitCSIErr.Error(), pod, pv); err != nil {
+				metrics.NewError("Event", "", "", "Kube API", "create")
+
 				logger.Error(err, "Failed to create event")
 			}
 
-			logger.Error(waitCSIErr, "CSI provision wait timeout")
 			return
 		default:
 			if waitCSIErr = r.Client.Get(ctx, types.NamespacedName{Name: pvc.Spec.VolumeName}, pv); waitCSIErr == nil &&
@@ -663,10 +773,6 @@ WAIT_CSI:
 
 	vaName, err := utils.RenderResourceName(true, config.Name, pvc.Name, pvc.Namespace)
 	if err != nil {
-		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to render VolumeAttachment name for %s: %s", config.Name, pv.Name), err.Error(), pod, pv); err != nil {
-			logger.Error(err, "Failed to create event")
-		}
-
 		logger.Error(err, "Failed to render VolumeAttachment name")
 		return
 	}
@@ -694,12 +800,17 @@ WAIT_CSI:
 
 	logger.Info("Create VolumeAttachment...", "attacher", sc.Provisioner, "node_name", nodeName)
 
-	if err = r.Create(ctx, volumeAttachment); err != nil {
+	if err = r.Client.Create(ctx, volumeAttachment); err != nil {
+		metrics.NewError("VolumeAttachment", volumeAttachment.Name, "", "Kube API", "create")
+
+		logger.Error(err, "Failed to create volume attachment")
+
 		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to create volume attachment for %s: %s", config.Name, pv.Name), err.Error(), pod, pv); err != nil {
+			metrics.NewError("Event", "", "", "Kube API", "create")
+
 			logger.Error(err, "Failed to create event")
 		}
 
-		logger.Error(err, "Failed to create volume attachment")
 		return
 	}
 
@@ -712,15 +823,20 @@ WAIT_CSI:
 		for {
 			select {
 			case <-waitCtx.Done():
+				metrics.NewError("VolumeAttachment", "", "", "Kube API", "list")
+
 				if waitVAErr == nil {
 					waitVAErr = waitCtx.Err()
 				}
 
+				logger.Error(waitVAErr, "VolumeAttachment wait timeout")
+
 				if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("VolumeAttachment wait timeout for %s: %s", config.Name, volumeAttachment.Name), waitVAErr.Error(), pod, volumeAttachment); err != nil {
+					metrics.NewError("Event", "", "", "Kube API", "create")
+
 					logger.Error(err, "Failed to create event")
 				}
 
-				logger.Error(waitVAErr, "VolumeAttachment wait timeout")
 				return
 			default:
 				volumeAttachment, waitVAErr = r.getVolumeAttachment(ctx, pvc.Spec.VolumeName)
@@ -743,11 +859,16 @@ WAIT_CSI:
 
 	preMountCmd, err := driver.GetPreMountCommand(pv, volumeAttachment)
 	if err != nil {
+		metrics.NewError("CSI", pv.Name, "", sc.Provisioner, "GetPreMountCommand")
+
+		logger.Error(err, "Failed to call driver", "method", "GetPreMountCommand")
+
 		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to call driver.GetPreMountCommand for %s: %s", config.Name, sc.Provisioner), err.Error(), pod, config); err != nil {
+			metrics.NewError("Event", "", "", "Kube API", "create")
+
 			logger.Error(err, "Failed to create event")
 		}
 
-		logger.Error(err, "Failed to call driver", "method", "GetPreMountCommand")
 		return
 	}
 
@@ -760,22 +881,23 @@ WAIT_CSI:
 		UID:        pvc.UID,
 	})
 	if err != nil {
-		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to render mount Job for %s", config.Name), err.Error(), pod, config); err != nil {
-			logger.Error(err, "Failed to create event")
-		}
-
 		logger.Error(err, "Unable to render mount job")
 		return
 	}
 
 	logger.Info("Create mount Job...", "containers", containerIDs, "mountpoint", mountpoint)
 
-	if err := r.Create(ctx, mountJob); err != nil {
+	if err := r.Client.Create(ctx, mountJob); err != nil {
+		metrics.NewError("Job", mountJob.Name, mountJob.Namespace, "Kube API", "create")
+
+		logger.Error(err, "Failed to create mount job")
+
 		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to create mount Job for %s", config.Name), err.Error(), pod, config); err != nil {
+			metrics.NewError("Event", "", "", "Kube API", "create")
+
 			logger.Error(err, "Failed to create event")
 		}
 
-		logger.Error(err, "Failed to create mount job")
 		return
 	}
 }
@@ -789,19 +911,27 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, pod *
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	if err := r.Update(ctx, pvc); err != nil {
+	if err := r.Client.Update(ctx, pvc); err != nil {
+		metrics.NewError("PersistentVolumeClaim", pvc.Name, pvc.Namespace, "Kube API", "get")
+
+		logger.Error(err, "Failed to update PVC")
+
 		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to update PVC for %s: %s", config.Name, pvc.Name), err.Error(), pod, pvc); err != nil {
+			metrics.NewError("Event", "", "", "Kube API", "create")
+
 			logger.Error(err, "Failed to create event")
 		}
 
-		logger.Error(err, "Failed to update PVC")
 		return
 	}
+	metrics.NewPVCOperation(pvc.Name, pvc.Namespace, "resize", capacity.String())
 
 	if _, ok := pvc.Labels["discoblocks-parent"]; !ok {
 		logger.Info("First PVC is managed by CSI driver")
 
 		if err := r.EventService.SendNormal(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("New capacity of %s: %s", pvc.Name, capacity.String()), "Operation finished: disk managed by CSI driver", pod, pvc); err != nil {
+			metrics.NewError("Event", "", "", "Kube API", "create")
+
 			logger.Error(err, "Failed to create event")
 		}
 
@@ -810,47 +940,67 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, pod *
 
 	sc := storagev1.StorageClass{}
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: config.Spec.StorageClassName}, &sc); err != nil {
+		metrics.NewError("StorageClass", config.Spec.StorageClassName, "", "Kube API", "get")
+
+		logger.Error(err, "StorageClass not found", "sc_name", config.Spec.StorageClassName)
+
 		if apierrors.IsNotFound(err) {
 			if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("StorageClass not found for %s: %s", config.Name, config.Spec.StorageClassName), err.Error(), pod, config); err != nil {
+				metrics.NewError("Event", "", "", "Kube API", "create")
+
 				logger.Error(err, "Failed to create event")
 			}
 
-			logger.Error(err, "StorageClass not found", "sc_name", config.Spec.StorageClassName)
 			return
 		}
 
+		logger.Error(err, "Unable to fetch StorageClass")
+
 		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to fetch StorageClass for %s: %s", config.Name, config.Spec.StorageClassName), err.Error(), pod, config); err != nil {
+			metrics.NewError("Event", "", "", "Kube API", "create")
+
 			logger.Error(err, "Failed to create event")
 		}
 
-		logger.Error(err, "Unable to fetch StorageClass")
 		return
 	}
 	logger = logger.WithValues("provisioner", sc.Provisioner)
 
 	driver := drivers.GetDriver(sc.Provisioner)
 	if driver == nil {
+		metrics.NewError("CSI", sc.Provisioner, "", sc.Provisioner, "GetDriver")
+
 		dmErr := errors.New("driver not found: " + sc.Provisioner)
 
+		logger.Error(dmErr, "Driver not found")
+
 		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to find driver for %s: %s", config.Name, sc.Provisioner), dmErr.Error(), pod, config); err != nil {
+			metrics.NewError("Event", "", "", "Kube API", "create")
+
 			logger.Error(err, "Failed to create event")
 		}
 
-		logger.Error(dmErr, "Driver not found")
 		return
 	}
 
 	if isFsManaged, err := driver.IsFileSystemManaged(); err != nil {
+		metrics.NewError("CSI", "", "", sc.Provisioner, "IsFileSystemManaged")
+
+		logger.Error(err, "Failed to call driver", "method", "IsFileSystemManaged")
+
 		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to call driver.IsFileSystemManaged %s: %s", config.Name, sc.Provisioner), err.Error(), pod, config); err != nil {
+			metrics.NewError("Event", "", "", "Kube API", "create")
+
 			logger.Error(err, "Failed to create event")
 		}
 
-		logger.Error(err, "Failed to call driver", "method", "IsFileSystemManaged")
 		return
 	} else if isFsManaged {
 		logger.Info("Filesystem will resized by CSI driver")
 
 		if err := r.EventService.SendNormal(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("New capacity of %s: %s", pvc.Name, capacity.String()), "Operation finished: disk resizing by CSI driver", pod, pvc); err != nil {
+			metrics.NewError("Event", "", "", "Kube API", "create")
+
 			logger.Error(err, "Failed to create event")
 		}
 
@@ -859,11 +1009,16 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, pod *
 
 	waitForMeta, err := driver.WaitForVolumeAttachmentMeta()
 	if err != nil {
+		metrics.NewError("CSI", "", "", sc.Provisioner, "WaitForVolumeAttachmentMeta")
+
+		logger.Error(err, "Failed to call driver", "method", "WaitForVolumeAttachmentMeta")
+
 		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to call driver.WaitForVolumeAttachmentMeta %s: %s", config.Name, sc.Provisioner), err.Error(), pod, config); err != nil {
+			metrics.NewError("Event", "", "", "Kube API", "create")
+
 			logger.Error(err, "Failed to create event")
 		}
 
-		logger.Error(err, "Failed to call driver", "method", "WaitForVolumeAttachmentMeta")
 		return
 	}
 
@@ -871,18 +1026,28 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, pod *
 
 	pv := &corev1.PersistentVolume{}
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: pvc.Spec.VolumeName}, pv); err != nil {
-		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to fetch PV for %s: %s", config.Name, pv.Name), err.Error(), pod, config); err != nil {
-			logger.Error(err, "Failed to create event")
-		}
+		metrics.NewError("PersistentVolume", pvc.Spec.VolumeName, "", "Kube API", "get")
 
 		logger.Error(err, "Failed to find PersistentVolume")
-		return
-	} else if pv.Spec.CSI == nil {
-		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to find pv.spec.csi for %s: %s", config.Name, pv.Name), err.Error(), pod, pv); err != nil {
+
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to fetch PV for %s: %s", config.Name, pv.Name), err.Error(), pod, config); err != nil {
+			metrics.NewError("Event", "", "", "Kube API", "create")
+
 			logger.Error(err, "Failed to create event")
 		}
 
+		return
+	} else if pv.Spec.CSI == nil {
+		metrics.NewError("PersistentVolume", pv.Name, "", "Kube API", "get")
+
 		logger.Error(err, "Failed to find pv.spec.csi")
+
+		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to find pv.spec.csi for %s: %s", config.Name, pv.Name), err.Error(), pod, pv); err != nil {
+			metrics.NewError("Event", "", "", "Kube API", "create")
+
+			logger.Error(err, "Failed to create event")
+		}
+
 		return
 	}
 
@@ -894,32 +1059,47 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, pod *
 
 		volumeAttachment, err = r.getVolumeAttachment(ctx, pvc.Spec.VolumeName)
 		if err != nil {
+			metrics.NewError("VolumeAttachment", "", "", "Kube API", "list")
+
+			logger.Error(err, "Failed to fetch VolumeAttachment")
+
 			if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to fetch VolumeAttachment for %s: %s", config.Name, pv.Name), err.Error(), pod, pv); err != nil {
+				metrics.NewError("Event", "", "", "Kube API", "create")
+
 				logger.Error(err, "Failed to create event")
 			}
 
-			logger.Error(err, "Failed to fetch VolumeAttachment")
 			return
 		}
 
 		volumeMeta = volumeAttachment.Status.AttachmentMetadata[waitForMeta]
 		if volumeMeta == "" {
+			metrics.NewError("VolumeAttachment", volumeAttachment.Name, "", "Kube API", "get")
+
+			logger.Error(err, "Failed to find VolumeAttachment meta")
+
 			if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to find VolumeAttachment meta for %s: %s", config.Name, pv.Name), err.Error(), pod, pv); err != nil {
+				metrics.NewError("Event", "", "", "Kube API", "create")
+
 				logger.Error(err, "Failed to create event")
 			}
 
-			logger.Error(err, "Failed to find VolumeAttachment meta")
 			return
 		}
 	}
 
 	preResizeCmd, err := driver.GetPreResizeCommand(pv, volumeAttachment)
 	if err != nil {
+		metrics.NewError("CSI", pv.Name, "", sc.Provisioner, "GetPreResizeCommand")
+
+		logger.Error(err, "Failed to call driver", "method", "GetPreResizeCommand")
+
 		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to call driver.GetPreResizeCommand for %s: %s", config.Name, sc.Provisioner), err.Error(), pod, config); err != nil {
+			metrics.NewError("Event", "", "", "Kube API", "create")
+
 			logger.Error(err, "Failed to create event")
 		}
 
-		logger.Error(err, "Failed to call driver", "method", "GetPreResizeCommand")
 		return
 	}
 
@@ -930,10 +1110,6 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, pod *
 		UID:        pvc.UID,
 	})
 	if err != nil {
-		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to render resize Job for %s", config.Name), err.Error(), pod, config); err != nil {
-			logger.Error(err, "Failed to create event")
-		}
-
 		logger.Error(err, "Unable to render mount job")
 		return
 	} else if resizeJob == nil {
@@ -942,19 +1118,24 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, pod *
 
 	logger.Info("Create resize Job...")
 
-	if err := r.Create(ctx, resizeJob); err != nil {
+	if err := r.Client.Create(ctx, resizeJob); err != nil {
+		metrics.NewError("Job", resizeJob.Name, resizeJob.Namespace, "Kube API", "create")
+
+		logger.Error(err, "Failed to create resize job")
+
 		if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to create resize Job for %s", config.Name), err.Error(), pod, config); err != nil {
+			metrics.NewError("Event", "", "", "Kube API", "create")
+
 			logger.Error(err, "Failed to create event")
 		}
 
-		logger.Error(err, "Failed to create resize job")
 		return
 	}
 }
 
 func (r *PVCReconciler) getVolumeAttachment(ctx context.Context, volumeName string) (*storagev1.VolumeAttachment, error) {
 	volumeAttachments := &storagev1.VolumeAttachmentList{}
-	if err := r.List(ctx, volumeAttachments, &client.ListOptions{
+	if err := r.Client.List(ctx, volumeAttachments, &client.ListOptions{
 		FieldSelector: client.MatchingFieldsSelector{
 			Selector: fields.OneTermEqualSelector("spec.source.persistentVolumeName", volumeName),
 		},
