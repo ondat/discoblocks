@@ -5,8 +5,8 @@ kind: ServiceMonitor
 metadata:
   labels:
     control-plane: controller-manager
-  name: controller-manager-metrics-monitor
-  namespace: system
+  name: discoblocks-controller-manager-metrics-monitor
+  namespace: kube-system
 spec:
   endpoints:
     - path: /metrics
@@ -15,6 +15,10 @@ spec:
       bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
       tlsConfig:
         insecureSkipVerify: true
+  namespaceSelector:
+    matchNames:
+    - kube-system
   selector:
     matchLabels:
-      control-plane: controller-manager
+      app: discoblocks
+      app.kubernetes.io/component: discoblocks

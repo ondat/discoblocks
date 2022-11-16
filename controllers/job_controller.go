@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
+	"github.com/ondat/discoblocks/pkg/metrics"
 	"github.com/ondat/discoblocks/pkg/utils"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -48,6 +49,8 @@ func (r *JobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	job := batchv1.Job{}
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: req.Name, Namespace: req.Namespace}, &job); err != nil {
 		if !apierrors.IsNotFound(err) {
+			metrics.NewError("Job", req.Name, req.Namespace, "Kube API", "get")
+
 			return ctrl.Result{}, fmt.Errorf("failed to fetch job %s/%s: %w", req.Namespace, req.Name, err)
 		}
 	}
@@ -60,6 +63,8 @@ func (r *JobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 			pod := corev1.Pod{}
 			if err := r.Client.Get(ctx, types.NamespacedName{Name: podName, Namespace: req.Namespace}, &pod); err != nil {
 				if !apierrors.IsNotFound(err) {
+					metrics.NewError("Pod", podName, req.Namespace, "Kube API", "get")
+
 					logger.Error(err, "Failed to fetch Pod", "pod_name", podName)
 					return ctrl.Result{}, fmt.Errorf("failed to fetch pod %s/%s: %w", req.Namespace, podName, err)
 				}
@@ -69,6 +74,8 @@ func (r *JobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 				pvc := &corev1.PersistentVolumeClaim{}
 				if err := r.Client.Get(ctx, types.NamespacedName{Name: pvcName, Namespace: req.Namespace}, pvc); err != nil {
 					if !apierrors.IsNotFound(err) {
+						metrics.NewError("PersistentVolumeClaim", pvcName, req.Namespace, "Kube API", "get")
+
 						logger.Error(err, "Failed to fetch PVC", "pvc_name", pvcName)
 						return ctrl.Result{}, fmt.Errorf("failed to fetch PVC %s/%s: %w", req.Namespace, pvcName, err)
 					}
@@ -83,10 +90,16 @@ func (r *JobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 
 				if succeeded {
 					if err := r.EventService.SendNormal(req.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("New capacity of %s: %s", pvcName, capacity), fmt.Sprintf("Operation finished: %s", operation), &pod, pvc); err != nil {
+						metrics.NewError("Event", "", "", "Kube API", "create")
+
 						logger.Error(err, "Failed to create event")
 					}
 				} else {
+					logger.Error(errors.New("job has failed"), "Job failed")
+
 					if err := r.EventService.SendWarning(req.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to apply new capacity of %s: %s", pvcName, capacity), fmt.Sprintf("Operation finished: %s", operation), &pod, pvc); err != nil {
+						metrics.NewError("Event", "", "", "Kube API", "create")
+
 						logger.Error(err, "Failed to create event")
 					}
 				}
@@ -108,10 +121,12 @@ func (r *JobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	logger.Info("Fetch Pods...")
 
 	podList := corev1.PodList{}
-	if err = r.List(ctx, &podList, &client.ListOptions{
+	if err = r.Client.List(ctx, &podList, &client.ListOptions{
 		Namespace:     req.Namespace,
 		LabelSelector: jobSelector,
 	}); err != nil {
+		metrics.NewError("Pod", "", req.Namespace, "Kube API", "list")
+
 		logger.Info("Failed to list Jobs", "error", err.Error())
 		return ctrl.Result{}, fmt.Errorf("failed to list Jobs: %w", err)
 	}
@@ -124,6 +139,8 @@ func (r *JobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 				continue
 			}
 
+			metrics.NewError("Pod", podList.Items[i].Name, podList.Items[i].Namespace, "Kube API", "delete")
+
 			logger.Info("Failed to delete pod", "pod_name", podList.Items[i].Name, "error", err.Error())
 			return ctrl.Result{}, fmt.Errorf("failed to delete Pod %s/%s: %w", req.Namespace, podList.Items[i].Name, err)
 		}
@@ -132,6 +149,8 @@ func (r *JobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	logger.Info("Delete Job...")
 
 	if err = r.Client.Delete(ctx, &job); err != nil && !apierrors.IsNotFound(err) {
+		metrics.NewError("Job", job.Name, job.Namespace, "Kube API", "delete")
+
 		return ctrl.Result{}, fmt.Errorf("failed to delete Job %s/%s: %w", req.Namespace, job.Name, err)
 	}
 

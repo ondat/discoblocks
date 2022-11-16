@@ -8,6 +8,7 @@ import (
 	"github.com/go-logr/logr"
 	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
 	"github.com/ondat/discoblocks/pkg/drivers"
+	"github.com/ondat/discoblocks/pkg/metrics"
 	"github.com/ondat/discoblocks/pkg/utils"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -50,6 +51,8 @@ func (s *podSCheduler) Filter(ctx context.Context, state *framework.CycleState, 
 	if err := s.Client.List(ctx, &diskConfigs, &client.ListOptions{
 		Namespace: pod.Namespace,
 	}); err != nil {
+		metrics.NewError("DiskConfig", "", pod.Namespace, "Kube API", "list")
+
 		logger.Error(err, "Failed to fetch DiskConfigs")
 		return framework.NewStatus(errorStatus, err.Error())
 	}
@@ -89,6 +92,8 @@ func (s *podSCheduler) Filter(ctx context.Context, state *framework.CycleState, 
 
 		sc := storagev1.StorageClass{}
 		if err := s.Client.Get(ctx, types.NamespacedName{Name: scName}, &sc); err != nil {
+			metrics.NewError("StorageClass", scName, "", "Kube API", "get")
+
 			if apierrors.IsNotFound(err) {
 				logger.Info("Failed to fetch StorageClass", "error", err.Error())
 				return framework.NewStatus(errorStatus, err.Error())
@@ -102,12 +107,16 @@ func (s *podSCheduler) Filter(ctx context.Context, state *framework.CycleState, 
 
 		driver := drivers.GetDriver(sc.Provisioner)
 		if driver == nil {
+			metrics.NewError("CSI", sc.Provisioner, "", sc.Provisioner, "GetDriver")
+
 			logger.Info("Driver not found")
 			return framework.NewStatus(errorStatus, "driver not found: "+sc.Provisioner)
 		}
 
 		namespace, podLabels, err := driver.GetCSIDriverDetails()
 		if err != nil {
+			metrics.NewError("CSI", "", "", sc.Provisioner, "GetCSIDriverDetails")
+
 			logger.Error(err, "Failed to call driver", "method", "GetCSIDriverDetails")
 			return framework.NewStatus(errorStatus, "failed to call driver: "+sc.Provisioner)
 		}
