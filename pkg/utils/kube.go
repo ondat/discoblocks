@@ -198,18 +198,8 @@ func RenderResizeJob(podName, pvcName, pvName, namespace, nodeName, fs, preResiz
 	return &job, nil
 }
 
-// NewPVC constructs a new PVC instance
-func NewPVC(config *discoblocksondatiov1.DiskConfig, prefix string, driver *drivers.Driver) (*corev1.PersistentVolumeClaim, error) {
-	pvcName, err := RenderResourceName(true, prefix, config.Name, config.Namespace)
-	if err != nil {
-		return nil, fmt.Errorf("unable to calculate hash: %w", err)
-	}
-
-	pvc, err := driver.GetPVCStub(pvcName, config.Namespace, config.Spec.StorageClassName)
-	if err != nil {
-		return nil, fmt.Errorf("unable to init a PVC: %w", err)
-	}
-
+// PVCDecorator decorates new PVC instance
+func PVCDecorator(config *discoblocksondatiov1.DiskConfig, prefix string, driver *drivers.Driver, pvc *corev1.PersistentVolumeClaim) {
 	pvc.Finalizers = []string{RenderFinalizer(config.Name)}
 
 	pvc.Labels = map[string]string{
@@ -226,8 +216,6 @@ func NewPVC(config *discoblocksondatiov1.DiskConfig, prefix string, driver *driv
 	if len(pvc.Spec.AccessModes) == 0 {
 		pvc.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
 	}
-
-	return pvc, nil
 }
 
 // NewStorageClass constructs a new StorageClass
