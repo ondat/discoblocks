@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ondat/discoblocks/pkg/metrics"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -88,6 +89,8 @@ func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 		return ctrl.Result{}, nil
 	case err != nil:
+		metrics.NewError("DiskConfig", req.Name, req.Namespace, "Kube API", "get")
+
 		return ctrl.Result{}, fmt.Errorf("unable to fetch DiskConfig: %w", err)
 	case config.DeletionTimestamp != nil:
 		logger.Info("DiskConfig delete in progress")
@@ -115,6 +118,8 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 
 	scList := storagev1.StorageClassList{}
 	if err := r.Client.List(ctx, &scList); err != nil {
+		metrics.NewError("StorageClass", "", "", "Kube API", "list")
+
 		return ctrl.Result{}, fmt.Errorf("unable to list StorageClasses: %w", err)
 	}
 
@@ -129,6 +134,8 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 		logger.Info("Remove StorageClass finalizer...", "finalizer", nsFinalizer)
 
 		if err := r.Client.Update(ctx, &scList.Items[i]); err != nil {
+			metrics.NewError("StorageClass", scList.Items[i].Name, scList.Items[i].Namespace, "Kube API", "update")
+
 			logger.Info("Failed to remove finalizer of StorageClass", "error", err.Error())
 			return ctrl.Result{}, fmt.Errorf("unable to remove finalizer of StorageClass: %w", err)
 		}
@@ -156,6 +163,8 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 		Namespace:     configNamespace,
 		LabelSelector: pvcSelector,
 	}); err != nil {
+		metrics.NewError("PersistentVolumeClaim", "", configNamespace, "Kube API", "list")
+
 		logger.Info("Failed to list PVCs", "error", err.Error())
 		return ctrl.Result{}, fmt.Errorf("unable to list PVCs: %w", err)
 	}
@@ -174,6 +183,8 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 
 			unlock, err := utils.WaitForSemaphore(ctx, sem)
 			if err != nil {
+				metrics.NewError("PersistentVolumeClaim", "", "", "DiscoBlocks", "semaphore")
+
 				logger.Info("Context deadline")
 				errChan <- fmt.Errorf("context deadline %s->%s", pvcList.Items[i].GetNamespace(), pvcList.Items[i].GetName())
 				return
@@ -186,6 +197,8 @@ func (r *DiskConfigReconciler) reconcileDelete(ctx context.Context, configName, 
 				logger.Info("Update PVC finalizer...", "finalizer", finalizer)
 
 				if err = r.Client.Update(ctx, &pvcList.Items[i]); err != nil {
+					metrics.NewError("PersistentVolumeClaim", pvcList.Items[i].Name, pvcList.Items[i].Namespace, "Kube API", "update")
+
 					logger.Info("Failed to remove finalizer of PVC", "error", err.Error())
 					errChan <- fmt.Errorf("unable to remove finalizer of PVC %s->%s: %w", pvcList.Items[i].Namespace, pvcList.Items[i].Name, err)
 					return
@@ -225,6 +238,8 @@ func (r *DiskConfigReconciler) reconcileUpdate(ctx context.Context, config *disc
 			return ctrl.Result{RequeueAfter: time.Minute}, nil
 		}
 
+		metrics.NewError("StorageClass", config.Spec.StorageClassName, "", "Kube API", "get")
+
 		logger.Info("Unable to fetch StorageClass", "error", err.Error())
 		return ctrl.Result{}, fmt.Errorf("unable to fetch StorageClass: %w", err)
 	}
@@ -237,6 +252,8 @@ func (r *DiskConfigReconciler) reconcileUpdate(ctx context.Context, config *disc
 		logger.Info("Update StorageClass finalizer...", "finalizer", scFinalizer)
 
 		if err := r.Client.Update(ctx, &sc); err != nil {
+			metrics.NewError("StorageClass", sc.Name, "", "Kube API", "update")
+
 			logger.Info("Failed to update StorageClass", "error", err.Error())
 			return ctrl.Result{}, fmt.Errorf("unable to update StorageClass: %w", err)
 		}
