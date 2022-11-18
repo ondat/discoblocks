@@ -95,7 +95,7 @@ type Policy struct {
 	//+kubebuilder:validation:Optional
 	ExtendCapacity resource.Quantity `json:"extendCapacity,omitempty" yaml:"extendCapacity,omitempty"`
 
-	// CoolDown defines temporary pause of scaling.
+	// CoolDown defines temporary pause of scaling. Minimum: 10s
 	//+kubebuilder:default:="5m"
 	//+kubebuilder:validation:Optional
 	CoolDown metav1.Duration `json:"coolDown,omitempty" yaml:"coolDown,omitempty"`
