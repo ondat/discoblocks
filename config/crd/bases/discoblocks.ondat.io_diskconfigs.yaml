@@ -125,7 +125,8 @@ spec:
                 properties:
                   coolDown:
                     default: 5m
-                    description: CoolDown defines temporary pause of scaling.
+                    description: 'CoolDown defines temporary pause of scaling. Minimum:
+                      10s'
                     type: string
                   extendCapacity:
                     anyOf:
