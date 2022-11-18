@@ -123,7 +123,6 @@ deploy-prometheus: ## Deploy prometheus to the K8s cluster specified in ~/.kube/
 	kubectl create -f bin/kube-prometheus/manifests/setup
 	until kubectl get servicemonitors --all-namespaces; do sleep 1; done
 	kubectl create -f bin/kube-prometheus/manifests
-	rm -rf bin/kube-prometheus
 
 .PHONY: undeploy-cert-prometheus
 undeploy-prometheus: ## Undeploy prometheus from the K8s cluster specified in ~/.kube/config.
