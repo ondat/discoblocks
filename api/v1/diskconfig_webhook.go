@@ -86,6 +86,13 @@ func (r *DiskConfig) validate(old runtime.Object) error {
 		return err
 	}
 
+	const ten = 10
+	if r.Spec.Policy.CoolDown.Duration < ten*time.Second {
+		err := fmt.Errorf("minimum cool down is %d seconds", ten)
+		logger.Info("Invalid cool down", "error", err.Error())
+		return err
+	}
+
 	if old != nil {
 		oldDC, ok := old.(*DiskConfig)
 		if !ok {
