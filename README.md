@@ -40,7 +40,7 @@ This is the home of [Discoblocks](https://discoblocks.io), an open-source declar
 
 ## About the name
 
-Some call storage snorage because they believe it is boring... but what we could have fun and dance with the block devices!
+Some call storage snorage because they believe it is boring... but we could have fun and dance with the block devices!
 
 ## Why discoblocks
 
