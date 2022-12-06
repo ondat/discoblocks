@@ -89,7 +89,7 @@ https://user-images.githubusercontent.com/55788733/168624989-c9b1d469-d3e5-40e7-
 
 ## How to install
 
-### Prerequizits
+### Prerequisites
 
 - Kubernetes cluster
 - Kubernetes CLI
