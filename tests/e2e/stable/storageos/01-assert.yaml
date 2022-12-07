@@ -4,7 +4,6 @@ metadata:
   labels:
     app: discoblocks
     app.kubernetes.io/component: discoblocks
-    control-plane: controller-manager
   name: discoblocks-controller-manager
   namespace: kube-system
 spec:
@@ -13,13 +12,11 @@ spec:
     matchLabels:
       app: discoblocks
       app.kubernetes.io/component: discoblocks
-      control-plane: controller-manager
   template:
     metadata:
       labels:
         app: discoblocks
         app.kubernetes.io/component: discoblocks
-        control-plane: controller-manager
     spec:
       schedulerName: default-scheduler
       securityContext:
