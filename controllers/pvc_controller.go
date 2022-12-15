@@ -28,6 +28,7 @@ import (
 
 	"github.com/go-logr/logr"
 	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
+	"github.com/ondat/discoblocks/pkg/diskinfo"
 	"github.com/ondat/discoblocks/pkg/drivers"
 	"github.com/ondat/discoblocks/pkg/metrics"
 	"github.com/ondat/discoblocks/pkg/utils"
@@ -294,7 +295,8 @@ func (r *PVCReconciler) MonitorVolumes() {
 		for p := range pods.Items {
 			pod := pods.Items[p]
 
-			if pod.DeletionTimestamp != nil {
+			// Skip monitoring of new Pods
+			if pod.DeletionTimestamp != nil || pod.CreationTimestamp.Add(config.Spec.Policy.CoolDown.Duration).After(time.Now()) {
 				continue
 			}
 
@@ -316,7 +318,7 @@ func (r *PVCReconciler) MonitorVolumes() {
 
 				logger.Info("Fetch DiskInfo...")
 
-				diskInfo, err := utils.FetchDiskInfo(fmt.Sprintf("%s:9100", pod.Status.PodIP))
+				diskInfo, err := diskinfo.Fetch(pod.Name, pod.Namespace)
 				if err != nil {
 					metrics.NewError("Pod", pod.Name, pod.Namespace, "DiscoBlocks", "metrics")
 
@@ -394,7 +396,7 @@ func (r *PVCReconciler) MonitorVolumes() {
 
 						logger.Error(err, "Unable to find metrics", "disk_info", diskInfo)
 
-						if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to find metrics of %s: %s", lastPVC.Name, lastMountPoint), err.Error(), &pod, nil); err != nil {
+						if err := r.EventService.SendWarning(pod.Namespace, "Discoblocks", "PVC Monitor", fmt.Sprintf("Failed to find metrics of %s: %s", lastPVC.Name, lastMountPoint), "Unable to find metrics", &pod, nil); err != nil {
 							metrics.NewError("Event", "", "", "Kube API", "create")
 
 							logger.Error(err, "Failed to create event")

@@ -87,7 +87,7 @@ func (r *DiskConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	case err != nil && apierrors.IsNotFound(err):
 		logger.Info("DiskConfig not found")
 
-		return ctrl.Result{}, nil
+		return r.reconcileDelete(ctx, req.Name, req.Namespace, logger.WithValues("mode", "delete"))
 	case err != nil:
 		metrics.NewError("DiskConfig", req.Name, req.Namespace, "Kube API", "get")
 

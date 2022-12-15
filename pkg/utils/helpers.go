@@ -1,17 +1,14 @@
 package utils
 
 import (
-	"bufio"
-	"context"
 	"errors"
 	"fmt"
-	"io"
-	"strconv"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
-	"github.com/reiver/go-telnet"
 )
 
 const maxName = 253
@@ -113,76 +110,12 @@ func GetNamePrefix(am discoblocksondatiov1.AvailabilityMode, configUID, nodeName
 	}
 }
 
-// FetchDiskInfo calls 'df' on the remote address
-func FetchDiskInfo(addr string) (map[string]float64, error) {
-	content, err := Telnet(addr)
+// ReadFileOrDie reads the file or die
+func ReadFileOrDie(path string) []byte {
+	content, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
-		return nil, fmt.Errorf("unable to call endpoint %s: %w", addr, err)
+		panic(err)
 	}
 
-	if len(content) <= 1 {
-		return nil, nil
-	}
-
-	content = content[1:]
-
-	diskInfo := map[string]float64{}
-	for _, line := range content {
-		parts := strings.Fields(line)
-
-		const six = 6
-		if len(parts) != six {
-			return nil, fmt.Errorf("unable to find valid disk info: %s", line)
-		}
-
-		const tt = 32
-		used, err := strconv.ParseFloat(parts[4][:len(parts[4])-1], tt)
-		if err != nil {
-			return nil, fmt.Errorf("unable to parse float by %s: %w", parts[4][:len(parts[4])-1], err)
-		}
-
-		diskInfo[parts[5]] = used
-	}
-
-	return diskInfo, nil
-}
-
-// Telnet calls endpoint and reads response
-func Telnet(addr string) (lines []string, err error) {
-	lines = []string{}
-
-	var conn *telnet.Conn
-	conn, err = telnet.DialTo(addr)
-	if err != nil {
-		return
-	}
-	defer conn.Close()
-
-	const five = 5
-	timeout, cancel := context.WithTimeout(context.Background(), time.Second*five)
-	defer cancel()
-
-	reader := bufio.NewReader(conn)
-	for {
-		select {
-		case <-timeout.Done():
-			err = timeout.Err()
-			return
-		default:
-			var line string
-			line, err = reader.ReadString('\n')
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					err = nil
-					return
-				}
-
-				return
-			}
-
-			if line != "" {
-				lines = append(lines, line[:len(line)-1])
-			}
-		}
-	}
+	return content
 }

@@ -23,9 +23,6 @@ var hostCommandReplacePattern = regexp.MustCompile(`\n`)
 
 const metricsTeamplate = `name: discoblocks-metrics
 image: alpine:3.16
-ports:
-- containerPort: 9100
-  protocol: TCP
 command:
 - sh
 - -c
@@ -35,9 +32,47 @@ command:
   cp -r /lib /opt/discoblocks &&
   patchelf --set-interpreter /opt/discoblocks/lib/ld-musl-x86_64.so.1 /opt/discoblocks/busybox &&
   trap exit SIGTERM ;
-  while true; do tcpserver -v -c 1 -D -P -R -H -t 3 -l 0 0.0.0.0 9100 df -P & c=$! wait $c; done
+  while true; do tcpserver -v -c 1 -D -P -R -H -t 3 -l 0 127.0.0.1 59100 df -P & c=$! wait $c; done
 securityContext:
   privileged: false
+`
+
+const metricsProxyTeamplate = `name: discoblocks-metrics-proxy
+image: nixery.dev/shell/frp
+command:
+- sh
+- -c
+- |
+  cat <<EOF > /tmp/frpc.ini
+  [common]
+  ; log_level = trace
+  disable_log_color = true
+  server_addr = discoblocks-proxy-service.kube-system.svc
+  server_port = 63535
+  login_fail_exit = true
+  pool_count = 1
+  use_encryption = true
+  health_check_timeout_s = 2
+  health_check_max_failed = 2
+  health_check_interval_s = 5
+  tls_enable = true
+  tls_cert_file = /etc/metrics-certs/tls.crt
+  tls_key_file = /etc/metrics-certs/tls.key
+  tls_trusted_ca_file = /etc/metrics-certs/ca.crt
+  [%s-%s]
+  type = tcp
+  local_ip = 127.0.0.1
+  local_port = 59100
+  remote_port = 0
+  EOF
+  trap exit SIGTERM ;
+  while true; do frpc -c /tmp/frpc.ini & c=$! wait $c; done
+securityContext:
+  privileged: false
+volumeMounts:
+- mountPath: /etc/metrics-certs
+  name: discoblocks-metrics-cert
+  readOnly: true
 `
 
 const hostJobTemplate = `apiVersion: batch/v1
@@ -134,6 +169,16 @@ trap "chroot /host nsenter --target 1 --mount umount /tmp/discoblocks${DEV}" EXI
 func RenderMetricsSidecar() (*corev1.Container, error) {
 	sidecar := corev1.Container{}
 	if err := yaml.Unmarshal([]byte(metricsTeamplate), &sidecar); err != nil {
+		return nil, fmt.Errorf("unable to unmarshal container: %w", err)
+	}
+
+	return &sidecar, nil
+}
+
+// RenderMetricsProxySidecar returns the metrics sidecar
+func RenderMetricsProxySidecar(name, namespace string) (*corev1.Container, error) {
+	sidecar := corev1.Container{}
+	if err := yaml.Unmarshal([]byte(fmt.Sprintf(metricsProxyTeamplate, namespace, name)), &sidecar); err != nil {
 		return nil, fmt.Errorf("unable to unmarshal container: %w", err)
 	}
 
