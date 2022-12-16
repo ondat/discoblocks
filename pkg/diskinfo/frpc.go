@@ -58,7 +58,7 @@ func getProxy(name, namespace string) (string, error) {
 
 					for i := range proxyInfo.Proxies {
 						// u:rite's !!!!!!!!!!!!!!
-						proxies.Store(proxyInfo.Proxies[i].Name, proxyInfo.Proxies[i].Conf)
+						proxies.Store(proxyInfo.Proxies[i].Name, proxyInfo.Proxies[i])
 					}
 				}()
 
