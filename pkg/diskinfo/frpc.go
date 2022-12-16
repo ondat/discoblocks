@@ -49,7 +49,7 @@ func getProxy(name, namespace string) (string, error) {
 					}
 
 					proxyInfo := server.GetProxyInfoResp{}
-					if err := json.Unmarshal(content, &content); err != nil {
+					if err := json.Unmarshal(content, &proxyInfo); err != nil {
 						proxyPollLog.Error(err, "failed to unmarshal content")
 						return
 					}
@@ -57,6 +57,7 @@ func getProxy(name, namespace string) (string, error) {
 					proxyPollLog.Info("Registered proxies", "count", len(proxyInfo.Proxies))
 
 					for i := range proxyInfo.Proxies {
+						// u:rite's !!!!!!!!!!!!!!
 						proxies.Store(proxyInfo.Proxies[i].Name, proxyInfo.Proxies[i].Conf)
 					}
 				}()
