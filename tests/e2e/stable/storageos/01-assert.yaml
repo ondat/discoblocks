@@ -19,8 +19,8 @@ spec:
         app.kubernetes.io/component: discoblocks
     spec:
       schedulerName: default-scheduler
-      securityContext:
-        runAsNonRoot: true
+      # securityContext:
+      #   runAsNonRoot: true
       serviceAccount: discoblocks-controller-manager
       serviceAccountName: discoblocks-controller-manager
 status:

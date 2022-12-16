@@ -478,6 +478,9 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		},
 		Immutable: &f,
 	}
+
+	logger.Info("Create certificate secret...")
+
 	if err := a.Client.Create(ctx, &metricsCert); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
 			metrics.NewError("Secret", metricsCert.Name, metricsCert.Namespace, "Kube API", "create")
