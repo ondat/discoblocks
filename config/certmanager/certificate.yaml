@@ -22,7 +22,7 @@ spec:
   issuerRef:
     kind: Issuer
     name: selfsigned-issuer
-  secretName: discoblocks-webook-cert # this secret will not be prefixed, since it's not managed by kustomize
+  secretName: discoblocks-webhook-cert # this secret will not be prefixed, since it's not managed by kustomize
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate

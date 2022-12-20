@@ -20,4 +20,4 @@ spec:
       - name: webhook-cert
         secret:
           defaultMode: 420
-          secretName: discoblocks-webook-cert
+          secretName: discoblocks-webhook-cert
