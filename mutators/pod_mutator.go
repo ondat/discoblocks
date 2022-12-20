@@ -447,6 +447,12 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 	logger.Info("Attach volume mounts...")
 
 	for i := range pod.Spec.Containers {
+		pod.Spec.Containers[i].VolumeMounts = append(pod.Spec.Containers[i].VolumeMounts, corev1.VolumeMount{
+			Name:      "discoblocks-tools",
+			MountPath: "/opt/discoblocks",
+			ReadOnly:  pod.Spec.Containers[i].Name != "discoblocks-metrics",
+		})
+
 		if pod.Spec.Containers[i].Name == "discoblocks-metrics-proxy" {
 			continue
 		}
@@ -457,12 +463,6 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 				MountPath: mp,
 			})
 		}
-
-		pod.Spec.Containers[i].VolumeMounts = append(pod.Spec.Containers[i].VolumeMounts, corev1.VolumeMount{
-			Name:      "discoblocks-tools",
-			MountPath: "/opt/discoblocks",
-			ReadOnly:  pod.Spec.Containers[i].Name != "discoblocks-metrics",
-		})
 	}
 
 	metricsCert := corev1.Secret{
