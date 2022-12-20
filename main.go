@@ -19,10 +19,12 @@ package main
 import (
 	"context"
 	"flag"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -65,6 +67,7 @@ var (
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get
+//+kubebuilder:rbac:groups="",resources=secrets,verbs=create
 //+kubebuilder:rbac:groups="",resources=pods,verbs=list;delete
 //+kubebuilder:rbac:groups="events.k8s.io",resources=events,verbs=create
 
@@ -85,6 +88,8 @@ func init() {
 }
 
 func main() {
+	http.DefaultClient.Timeout = time.Minute
+
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string

@@ -52,6 +52,12 @@ rules:
   - delete
   - list
 - apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+- apiGroups:
   - apps
   resources:
   - replicasets

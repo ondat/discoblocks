@@ -94,6 +94,7 @@ spec:
   containers:
   - name: nginx
   - name: discoblocks-metrics
+  - name: discoblocks-metrics-proxy
 status:
   phase: Running
 ---

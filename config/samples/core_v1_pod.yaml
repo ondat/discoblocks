@@ -4,6 +4,7 @@ metadata:
   labels:
     discoblocks: diskconfig-sample
   name: diskconfig-sample
+  namespace: default
 spec:
   # hostPID: true
   terminationGracePeriodSeconds: 1

@@ -44,7 +44,7 @@ spec:
     coolDown: 10m
 EOF
 
-kubectl apply create deployment --image=nginx nginx
+kubectl create deployment --image=nginx nginx
 ```
 
 ### Build your own version

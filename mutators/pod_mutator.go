@@ -19,6 +19,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
@@ -27,6 +28,22 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
+
+var (
+	CACert     = "/tmp/k8s-webhook-server/metrics-certs/ca.crt"
+	ServerCert = "/tmp/k8s-webhook-server/metrics-certs/tls.crt"
+	ServerKey  = "/tmp/k8s-webhook-server/metrics-certs/tls.key"
+
+	caCert     []byte
+	serverCert []byte
+	serverKey  []byte
+)
+
+func init() {
+	caCert = utils.ReadFileOrDie(CACert)
+	serverCert = utils.ReadFileOrDie(ServerCert)
+	serverKey = utils.ReadFileOrDie(ServerKey)
+}
 
 // log is for logging in this package
 var podMutatorLog = logf.Log.WithName("mutators.PodMutator")
@@ -396,6 +413,30 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		})
 	}
 
+	metricsProxySideCar, err := utils.RenderMetricsProxySidecar(pod.Name, pod.Namespace)
+	if err != nil {
+		logger.Error(err, "Metrics Proxy sidecar template invalid")
+		return admission.Allowed("Metrics Proxy sidecar template invalid")
+	}
+	pod.Spec.Containers = append(pod.Spec.Containers, *metricsProxySideCar)
+
+	const fht = 420
+	var m int32 = fht
+	f := false
+
+	for _, vm := range metricsProxySideCar.VolumeMounts {
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+			Name: vm.Name,
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName:  vm.Name,
+					DefaultMode: &m,
+					Optional:    &f,
+				},
+			},
+		})
+	}
+
 	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 		Name: "discoblocks-tools",
 		VolumeSource: corev1.VolumeSource{
@@ -406,18 +447,47 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 	logger.Info("Attach volume mounts...")
 
 	for i := range pod.Spec.Containers {
+		pod.Spec.Containers[i].VolumeMounts = append(pod.Spec.Containers[i].VolumeMounts, corev1.VolumeMount{
+			Name:      "discoblocks-tools",
+			MountPath: "/opt/discoblocks",
+			ReadOnly:  pod.Spec.Containers[i].Name != "discoblocks-metrics",
+		})
+
+		if pod.Spec.Containers[i].Name == "discoblocks-metrics-proxy" {
+			continue
+		}
+
 		for name, mp := range volumes {
 			pod.Spec.Containers[i].VolumeMounts = append(pod.Spec.Containers[i].VolumeMounts, corev1.VolumeMount{
 				Name:      name,
 				MountPath: mp,
 			})
 		}
+	}
 
-		pod.Spec.Containers[i].VolumeMounts = append(pod.Spec.Containers[i].VolumeMounts, corev1.VolumeMount{
-			Name:      "discoblocks-tools",
-			MountPath: "/opt/discoblocks",
-			ReadOnly:  pod.Spec.Containers[i].Name != "discoblocks-metrics",
-		})
+	metricsCert := corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "discoblocks-metrics-cert",
+			Namespace: pod.Namespace,
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{
+			"ca.crt":  caCert,
+			"tls.crt": serverCert,
+			"tls.key": serverKey,
+		},
+		Immutable: &f,
+	}
+
+	logger.Info("Create certificate secret...")
+
+	if err := a.Client.Create(ctx, &metricsCert); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			metrics.NewError("Secret", metricsCert.Name, metricsCert.Namespace, "Kube API", "create")
+
+			logger.Info("Failed to create Secret", "error", err.Error())
+			return admission.Errored(http.StatusInternalServerError, fmt.Errorf("unable to create Secret: %w", err))
+		}
 	}
 
 	marshaledPod, err := json.Marshal(pod)
