@@ -2,8 +2,8 @@ name: Release Version
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - "v*"
 
 permissions:
   contents: read
@@ -42,11 +42,12 @@ jobs:
     uses: ./.github/workflows/_kuttl.yml
     needs: image-build
 
-  auto-release:
-    if: startsWith(github.ref, 'refs/tags/v')
+  auto-pre-release:
+    if: startsWith(github.ref, 'refs/tags/v') && (contains(github.ref_name, '-alpha.') || contains(github.ref_name, '-beta.'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@a12a3943b4bdde767164f792f33f40b04645d846
@@ -84,6 +85,55 @@ jobs:
         uses: softprops/action-gh-release@1e07f4398721186383de40550babbdf2b84acfc5
         with:
           prerelease: true
+          body_path: CHANGELOG.md
+          files: |
+            discoblocks-bundle.yaml
+            discoblocks-kustomize.tar.gz
+    needs: [image-vulnerability-scan, kuttl]
+
+  auto-release:
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-alpha.') && !contains(github.ref_name, '-beta.')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@a12a3943b4bdde767164f792f33f40b04645d846
+        with:
+          fetch-depth: 0
+      - name: log in to ghrc.io
+        uses: docker/login-action@1edf6180e07d2ffb423fc48a1a552855c0a1f508
+        with: 
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag and push image
+        run: |
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+      - name: Generate bundle manifest
+        run: make bundle
+        env:
+          IMG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+      - name: Compress Kustomize manifests
+        run: (cd config ; tar -czvf ../discoblocks-kustomize.tar.gz .)
+      - name: Set since tag
+        run: echo "SINCE_TAG=$(git describe --tags --always $(git rev-list --tags) | grep -e '^v[0-9]+*\.[0-9]+*\.[0-9]+*$' | head -2 | tail -1)" >> $GITHUB_ENV
+      - name: "Generate release changelog"
+        uses: heinrichreimer/github-changelog-generator-action@6f5b9494dd265d6fb7243a10c53dc0169c55f247
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }} 
+          base: .github/RELEASE_TEMPLATE.md
+          sinceTag: ${{ env.SINCE_TAG }}
+          simpleList: true
+      - name: Fix version in changelog
+        run: sed -i "s/#VERSION#/${{ github.ref_name }}/g" CHANGELOG.md
+      - name: Create pre-release
+        uses: softprops/action-gh-release@1e07f4398721186383de40550babbdf2b84acfc5
+        with:
+          prerelease: false
           body_path: CHANGELOG.md
           files: |
             discoblocks-bundle.yaml
