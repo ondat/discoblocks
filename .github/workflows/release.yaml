@@ -2,7 +2,7 @@ name: Release Version
 
 on:
   push:
-    tags:      
+    tags:
       - "v*"
 
 permissions:
@@ -133,9 +133,9 @@ jobs:
       - name: Create pre-release
         uses: softprops/action-gh-release@1e07f4398721186383de40550babbdf2b84acfc5
         with:
-          prerelease: true
+          prerelease: false
           body_path: CHANGELOG.md
           files: |
             discoblocks-bundle.yaml
             discoblocks-kustomize.tar.gz
-    needs: [image-vulnerability-scan]
+    needs: [image-vulnerability-scan, kuttl]
