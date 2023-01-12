@@ -93,7 +93,7 @@ spec:
       nodeName: "%s"
       containers:
       - name: mount
-        image: nixery.dev/shell/gawk/gnugrep/gnused/coreutils-full/cri-tools/docker-client/nvme-cli
+        image: nixery.dev/shell/gawk/gnugrep/gnused/coreutils-full/cri-tools/docker-client/nerdctl/nvme-cli
         env:
         - name: MOUNT_POINT
           value: "%s"
@@ -144,7 +144,7 @@ DEV_MAJOR=$(chroot /host nsenter --target 1 --mount lsblk -lp | grep ${DEV} | aw
 DEV_MINOR=$(chroot /host nsenter --target 1 --mount lsblk -lp | grep ${DEV} | awk '{print $2}'  | awk '{split($0,a,":"); print a[2]}') &&
 export LD_LIBRARY_PATH=/opt/discoblocks/lib &&
 for CONTAINER_ID in ${CONTAINER_IDS}; do
-	PID=$(docker inspect -f '{{.State.Pid}}' ${CONTAINER_ID} || crictl --runtime-endpoint unix:///run/containerd/containerd.sock inspect --output go-template --template '{{.info.pid}}' ${CONTAINER_ID}) &&
+	PID=$(docker inspect -f '{{.State.Pid}}' ${CONTAINER_ID} || nerdctl -n k8s.io inspect -f '{{.State.Pid}}' ${CONTAINER_ID} || crictl --runtime-endpoint unix:///run/containerd/containerd.sock inspect --output go-template --template '{{.info.pid}}' ${CONTAINER_ID}) &&
 	chroot /host nsenter --target ${PID} --mount /opt/discoblocks/busybox mount | grep "${DEV} on ${MOUNT_POINT}" || (
 		chroot /host nsenter --target ${PID} --mount /opt/discoblocks/busybox mkdir -p $(dirname ${DEV}) ${MOUNT_POINT} &&
 		(chroot /host nsenter --target ${PID} --pid --mount /opt/discoblocks/busybox mknod ${DEV} b ${DEV_MAJOR} ${DEV_MINOR} ||:) &&
