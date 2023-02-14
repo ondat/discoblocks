@@ -33,7 +33,7 @@ patchesStrategicMerge:
 
 # Mount the controller config file for loading manager configurations
 # through a ComponentConfig type
-#- manager_config_patch.yaml
+- manager_config_patch.yaml
 
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix including the one in
 # crd/kustomization.yaml
@@ -73,14 +73,3 @@ vars:
     kind: Service
     version: v1
     name: webhook-service
-patches:
-  - patch: |-
-      - op: replace
-        path: "/spec/template/spec/containers/0/env/0"
-        value:
-          name: SUPPORTED_CSI_DRIVERS
-          value: "ebs.csi.aws.com,csi.storageos.com"
-    target:
-      kind: Deployment
-      namespace: system
-      name: controller-manager

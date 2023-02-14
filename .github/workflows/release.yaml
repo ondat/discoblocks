@@ -34,13 +34,29 @@ jobs:
     uses: ./.github/workflows/_docker-build.yml
     needs: [test, golangci-lint, gosec-scanning]
 
+  job-image-build:
+    run: |
+      ORIGINAL=$(grep -r "var JobImage" pkg/utils/ | head -1 | cut -d\" -f2)
+      docker pull ${ORIGINAL}
+      docker tag ${ORIGINAL} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-job:${{ env.IMAGE_TAG }}
+      docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-job:${{ env.IMAGE_TAG }}
+    needs: image-build
+
+  proxy-image-build:
+    run: |
+      ORIGINAL=$(grep -r "var ProxyImage" pkg/utils/ | head -1 | cut -d\" -f2)
+      docker pull ${ORIGINAL}
+      docker tag ${ORIGINAL} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-proxy:${{ env.IMAGE_TAG }}
+      docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-proxy:${{ env.IMAGE_TAG }}
+    needs: image-build
+
   image-vulnerability-scan:
     uses: ./.github/workflows/_trivy.yml
     needs: image-build
 
   kuttl:
     uses: ./.github/workflows/_kuttl.yml
-    needs: image-build
+    needs: [image-build, job-image-build, proxy-image-build]
 
   auto-pre-release:
     if: startsWith(github.ref, 'refs/tags/v') && (contains(github.ref_name, '-alpha.') || contains(github.ref_name, '-beta.'))

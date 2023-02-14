@@ -51,14 +51,16 @@ var podMutatorLog = logf.Log.WithName("mutators.PodMutator")
 var _ admission.Handler = &PodMutator{}
 
 type PodMutator struct {
-	Client  client.Client
-	strict  bool
-	decoder *admission.Decoder
+	proxyImage string
+	client     client.Client
+	strict     bool
+	decoder    *admission.Decoder
 }
 
 //+kubebuilder:webhook:path=/mutate-v1-pod,mutating=true,sideEffects=NoneOnDryRun,failurePolicy=fail,groups="",resources=pods,verbs=create,versions=v1,admissionReviewVersions=v1,name=mpod.kb.io
 
 // Handle pod mutation
+//
 //nolint:gocyclo // It is complex we know
 func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	logger := podMutatorLog.WithValues("req_name", req.Name, "namespace", req.Namespace)
@@ -84,7 +86,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 	logger.Info("Fetch DiskConfigs...")
 
 	diskConfigs := discoblocksondatiov1.DiskConfigList{}
-	if err := a.Client.List(ctx, &diskConfigs, &client.ListOptions{
+	if err := a.client.List(ctx, &diskConfigs, &client.ListOptions{
 		Namespace: pod.Namespace,
 	}); err != nil {
 		metrics.NewError("DiskConfig", "", pod.Namespace, "Kube API", "list")
@@ -171,7 +173,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		logger.Info("Fetch StorageClass...")
 
 		sc := storagev1.StorageClass{}
-		if err := a.Client.Get(ctx, types.NamespacedName{Name: config.Spec.StorageClassName}, &sc); err != nil {
+		if err := a.client.Get(ctx, types.NamespacedName{Name: config.Spec.StorageClassName}, &sc); err != nil {
 			metrics.NewError("StorageClass", config.Spec.StorageClassName, "", "Kube API", "get")
 
 			if apierrors.IsNotFound(err) {
@@ -224,7 +226,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 				logger.Info("Fetch Node...")
 
 				node := &corev1.Node{}
-				if err := a.Client.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
+				if err := a.client.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
 					metrics.NewError("Node", nodeName, "", "Kube API", "get")
 
 					return admission.Errored(http.StatusInternalServerError, err)
@@ -249,7 +251,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 					logger.Info("Create StorageClass...")
 
-					if err = a.Client.Create(ctx, topologySC); err != nil && !apierrors.IsAlreadyExists(err) {
+					if err = a.client.Create(ctx, topologySC); err != nil && !apierrors.IsAlreadyExists(err) {
 						metrics.NewError("StorageClass", topologySC.Name, "", "Kube API", "create")
 
 						return admission.Errored(http.StatusInternalServerError, err)
@@ -261,7 +263,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 			logger.Info("Create PVC...")
 
-			if err = a.Client.Create(ctx, pvc); err != nil {
+			if err = a.client.Create(ctx, pvc); err != nil {
 				if !apierrors.IsAlreadyExists(err) {
 					metrics.NewError("PersistentVolume", pvc.Name, pvc.Namespace, "Kube API", "create")
 
@@ -275,7 +277,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 				logger.Info("Fetch PVC...")
 
-				if err = a.Client.Get(ctx, types.NamespacedName{Name: pvc.Name, Namespace: pvc.Namespace}, pvc); err != nil {
+				if err = a.client.Get(ctx, types.NamespacedName{Name: pvc.Name, Namespace: pvc.Namespace}, pvc); err != nil {
 					metrics.NewError("PersistentVolumeClaim", pvc.Name, pvc.Namespace, "Kube API", "get")
 
 					logger.Error(err, "Unable to fetch PVC", "name", pvc.Name)
@@ -287,7 +289,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 					logger.Info("Update PVC finalizer...", "name", pvc.Name)
 
-					if err = a.Client.Update(ctx, pvc); err != nil {
+					if err = a.client.Update(ctx, pvc); err != nil {
 						metrics.NewError("PersistentVolumeClaim", pvc.Name, pvc.Namespace, "Kube API", "update")
 
 						logger.Error(err, "Unable to update PVC finalizer", "name", pvc.Name)
@@ -307,7 +309,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 					logger.Info("Fetch PVCs...")
 
 					pvcs := corev1.PersistentVolumeClaimList{}
-					if err = a.Client.List(ctx, &pvcs, &client.ListOptions{
+					if err = a.client.List(ctx, &pvcs, &client.ListOptions{
 						Namespace:     config.Namespace,
 						LabelSelector: pvcSelector,
 					}); err != nil {
@@ -331,7 +333,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 							logger.Info("Update PVC child finalizer...", "name", pvcs.Items[i].Name)
 
-							if err = a.Client.Update(ctx, &pvcs.Items[i]); err != nil {
+							if err = a.client.Update(ctx, &pvcs.Items[i]); err != nil {
 								metrics.NewError("PersistentVolumeClaim", pvcs.Items[i].Name, pvcs.Items[i].Namespace, "Kube API", "update")
 
 								logger.Error(err, "Unable to update PVC finalizer", "name", pvcs.Items[i].Name)
@@ -413,7 +415,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		})
 	}
 
-	metricsProxySideCar, err := utils.RenderMetricsProxySidecar(pod.Name, pod.Namespace)
+	metricsProxySideCar, err := utils.RenderMetricsProxySidecar(a.proxyImage, pod.Name, pod.Namespace)
 	if err != nil {
 		logger.Error(err, "Metrics Proxy sidecar template invalid")
 		return admission.Allowed("Metrics Proxy sidecar template invalid")
@@ -481,7 +483,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 
 	logger.Info("Create certificate secret...")
 
-	if err := a.Client.Create(ctx, &metricsCert); err != nil {
+	if err := a.client.Create(ctx, &metricsCert); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
 			metrics.NewError("Secret", metricsCert.Name, metricsCert.Namespace, "Kube API", "create")
 
@@ -508,9 +510,10 @@ func (a *PodMutator) InjectDecoder(d *admission.Decoder) error {
 }
 
 // NewPodMutator creates a new pod mutator
-func NewPodMutator(kubeClient client.Client, strict bool) *PodMutator {
+func NewPodMutator(kubeClient client.Client, strict bool, proxyImage string) *PodMutator {
 	return &PodMutator{
-		Client: kubeClient,
-		strict: strict,
+		proxyImage: proxyImage,
+		client:     kubeClient,
+		strict:     strict,
 	}
 }
