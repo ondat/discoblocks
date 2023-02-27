@@ -11,7 +11,7 @@ type Semaphore func() (bool, func())
 
 // CreateSemaphore creates a new semaphore to limit concurrency
 func CreateSemaphore(concurrency int, wait time.Duration) Semaphore {
-	var lock = make(chan bool, concurrency)
+	lock := make(chan bool, concurrency)
 
 	return func() (bool, func()) {
 		timer := time.NewTimer(wait)
