@@ -40,7 +40,11 @@ func getProxy(name, namespace string) (string, error) {
 						proxyPollLog.Error(err, "failed to call dashboard")
 						return
 					}
-					defer resp.Body.Close()
+					defer func() {
+						if err := resp.Body.Close(); err != nil {
+							proxyPollLog.Error(err, "failed to close body")
+						}
+					}()
 
 					content, err := io.ReadAll(resp.Body)
 					if err != nil {
