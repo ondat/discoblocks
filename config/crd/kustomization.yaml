@@ -3,6 +3,7 @@
 # It should be run by config/default
 resources:
 - bases/discoblocks.ondat.io_diskconfigs.yaml
+# - bases/config.discoblocks.ondat.io_operatorconfigs.yaml
 #+kubebuilder:scaffold:crdkustomizeresource
 
 patchesStrategicMerge:

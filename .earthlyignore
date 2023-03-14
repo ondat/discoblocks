@@ -1,0 +1,6 @@
+.git/
+.github/
+.husky/
+.vscode/
+bin/
+kind-logs-*

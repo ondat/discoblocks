@@ -21,43 +21,6 @@ env:
   IMAGE_NAME: ${{ github.repository }}
   IMAGE_TAG: ${{ github.sha }}
 jobs:
-  test:
-    uses: ./.github/workflows/_test.yml
-
-  golangci-lint:
-    uses: ./.github/workflows/_gocilint.yml
-
-  gosec-scanning:
-    uses: ./.github/workflows/_gosecscan.yml
-
-  image-build:
-    uses: ./.github/workflows/_docker-build.yml
-    needs: [test, golangci-lint, gosec-scanning]
-
-  job-image-build:
-    run: |
-      ORIGINAL=$(grep -r "var JobImage" pkg/utils/ | head -1 | cut -d\" -f2)
-      docker pull ${ORIGINAL}
-      docker tag ${ORIGINAL} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-job:${{ env.IMAGE_TAG }}
-      docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-job:${{ env.IMAGE_TAG }}
-    needs: image-build
-
-  proxy-image-build:
-    run: |
-      ORIGINAL=$(grep -r "var ProxyImage" pkg/utils/ | head -1 | cut -d\" -f2)
-      docker pull ${ORIGINAL}
-      docker tag ${ORIGINAL} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-proxy:${{ env.IMAGE_TAG }}
-      docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-proxy:${{ env.IMAGE_TAG }}
-    needs: image-build
-
-  image-vulnerability-scan:
-    uses: ./.github/workflows/_trivy.yml
-    needs: image-build
-
-  kuttl:
-    uses: ./.github/workflows/_kuttl.yml
-    needs: [image-build, job-image-build, proxy-image-build]
-
   auto-pre-release:
     if: startsWith(github.ref, 'refs/tags/v') && (contains(github.ref_name, '-alpha.') || contains(github.ref_name, '-beta.'))
     runs-on: ubuntu-latest
@@ -65,7 +28,11 @@ jobs:
       contents: write
       packages: write
     steps:
-      - name: Checkout
+      - name: harden runner
+        uses: step-security/harden-runner@9b0655f430fba8c7001d4e38f8d4306db5c6e0ab
+        with:
+          egress-policy: audit
+      - name: checkout
         uses: actions/checkout@a12a3943b4bdde767164f792f33f40b04645d846
         with:
           fetch-depth: 0
@@ -75,29 +42,22 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Tag and push image
-        run: |
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-      - name: Generate bundle manifest
-        run: make bundle
-        env:
-          IMG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-      - name: Compress Kustomize manifests
-        run: (cd config ; tar -czvf ../discoblocks-kustomize.tar.gz .)
-      - name: Set since tag
+      - name: run e2e workflow
+        uses: ./.github/workflows/e2e-on-pr.yaml
+      - name: push images
+        run: make docker-push
+      - name: set since tag
         run: echo "SINCE_TAG=$(git describe --tags --always $(git rev-list --tags) | grep -e '^v[0-9]+*\.[0-9]+*\.[0-9]+*$' | head -1)" >> $GITHUB_ENV
-      - name: "Generate release changelog"
+      - name: generate release changelog
         uses: heinrichreimer/github-changelog-generator-action@6f5b9494dd265d6fb7243a10c53dc0169c55f247
         with:
           token: ${{ secrets.GITHUB_TOKEN }} 
           base: .github/RELEASE_TEMPLATE.md
           sinceTag: ${{ env.SINCE_TAG }}
           simpleList: true
-      - name: Fix version in changelog
+      - name: fix version in changelog
         run: sed -i "s/#VERSION#/${{ github.ref_name }}/g" CHANGELOG.md
-      - name: Create pre-release
+      - name: create pre-release
         uses: softprops/action-gh-release@1e07f4398721186383de40550babbdf2b84acfc5
         with:
           prerelease: true
@@ -105,7 +65,6 @@ jobs:
           files: |
             discoblocks-bundle.yaml
             discoblocks-kustomize.tar.gz
-    needs: [image-vulnerability-scan, kuttl]
 
   auto-release:
     if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-alpha.') && !contains(github.ref_name, '-beta.')
@@ -114,7 +73,11 @@ jobs:
       contents: write
       packages: write
     steps:
-      - name: Checkout
+      - name: harden runner
+        uses: step-security/harden-runner@9b0655f430fba8c7001d4e38f8d4306db5c6e0ab
+        with:
+          egress-policy: audit
+      - name: checkout
         uses: actions/checkout@a12a3943b4bdde767164f792f33f40b04645d846
         with:
           fetch-depth: 0
@@ -124,29 +87,22 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Tag and push image
-        run: |
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-      - name: Generate bundle manifest
-        run: make bundle
-        env:
-          IMG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-      - name: Compress Kustomize manifests
-        run: (cd config ; tar -czvf ../discoblocks-kustomize.tar.gz .)
-      - name: Set since tag
+      - name: run e2e workflow
+        uses: ./.github/workflows/e2e-on-pr.yaml
+      - name: push images
+        run: make docker-push
+      - name: set since tag
         run: echo "SINCE_TAG=$(git describe --tags --always $(git rev-list --tags) | grep -e '^v[0-9]+*\.[0-9]+*\.[0-9]+*$' | head -2 | tail -1)" >> $GITHUB_ENV
-      - name: "Generate release changelog"
+      - name: generate release changelog
         uses: heinrichreimer/github-changelog-generator-action@6f5b9494dd265d6fb7243a10c53dc0169c55f247
         with:
           token: ${{ secrets.GITHUB_TOKEN }} 
           base: .github/RELEASE_TEMPLATE.md
           sinceTag: ${{ env.SINCE_TAG }}
           simpleList: true
-      - name: Fix version in changelog
+      - name: fix version in changelog
         run: sed -i "s/#VERSION#/${{ github.ref_name }}/g" CHANGELOG.md
-      - name: Create pre-release
+      - name: create pre-release
         uses: softprops/action-gh-release@1e07f4398721186383de40550babbdf2b84acfc5
         with:
           prerelease: false
@@ -154,4 +110,3 @@ jobs:
           files: |
             discoblocks-bundle.yaml
             discoblocks-kustomize.tar.gz
-    needs: [image-vulnerability-scan, kuttl]

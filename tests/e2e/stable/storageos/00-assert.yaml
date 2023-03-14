@@ -5,33 +5,3 @@ metadata:
   namespace: cert-manager
 status:
   availableReplicas: 1
----
-apiVersion: storageos.com/v1
-kind: StorageOSCluster
-metadata:
-  name: storageoscluster
-  namespace: storageos
-status:
-  conditions:
-  - message: Scheduler Ready
-    reason: Ready
-    status: "True"
-    type: SchedulerReady
-  - message: Node Ready
-    reason: Ready
-    status: "True"
-    type: NodeReady
-  - message: APIManager Ready
-    reason: Ready
-    status: "True"
-    type: APIManagerReady
-  - message: CSI Ready
-    reason: Ready
-    status: "True"
-    type: CSIReady
-  - message: Cluster Ready
-    reason: Ready
-    status: "True"
-    type: Ready
-  phase: Running
-  ready: 1/1

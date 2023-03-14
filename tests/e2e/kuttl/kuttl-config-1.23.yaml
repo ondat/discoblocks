@@ -1,9 +1,12 @@
-apiVersion: kuttl.dev/v1beta1
+apiVersion: kuttl.dev/v1
 kind: TestSuite
 testDirs:
 - ./tests/e2e/stable
-kindConfig: tests/e2e/kind/kind-config-1.23.yaml
 startKIND: true
+kindConfig: tests/e2e/kind/kind-config-1.23.yaml
+kindNodeCache: true
 kindContainers:
   - local/discoblocks:e2e
-timeout: 500
+  - local/discoblocks:job-e2e
+  - local/discoblocks:proxy-e2e
+timeout: 240

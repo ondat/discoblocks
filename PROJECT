@@ -16,4 +16,11 @@ resources:
   webhooks:
     validation: true
     webhookVersion: v1
+- api:
+    crdVersion: v1
+    namespaced: true
+  group: config.discoblocks.ondat.io
+  kind: OperatorConfig
+  path: github.com/ondat/discoblocks/api/config.discoblocks.ondat.io/v1
+  version: v1
 version: "3"

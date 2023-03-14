@@ -13,6 +13,7 @@ if git status --short | grep -qv "??"; then
     trap unstash EXIT
 fi
 
-make manifests generate test
+make earthly manifests generate
+./bin/earthly -P +all
 
 git diff --exit-code --quiet || (git status && exit 1)

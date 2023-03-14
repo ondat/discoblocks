@@ -39,7 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	configdiscoblockv1 "github.com/ondat/discoblocks/api/config.discoblocks.io/v1"
+	configdiscoblockv1 "github.com/ondat/discoblocks/api/config.discoblocks.ondat.io/v1"
 	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
 	"github.com/ondat/discoblocks/controllers"
 	"github.com/ondat/discoblocks/mutators"
@@ -85,6 +85,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(discoblocksondatiov1.AddToScheme(scheme))
+	utilruntime.Must(configdiscoblockv1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -138,7 +139,8 @@ func main() {
 
 	if configFile != "" {
 		var err error
-		options, err = options.AndFrom(ctrl.ConfigFile().AtPath(configFile).OfKind(&operatorConfig))
+		cfg := ctrl.ConfigFile()
+		options, err = options.AndFrom(cfg.AtPath(configFile).OfKind(&operatorConfig))
 		if err != nil {
 			setupLog.Error(err, "unable to load the config file")
 			os.Exit(1)
