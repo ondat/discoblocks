@@ -4,7 +4,7 @@ commands:
   - command: kubectl apply -f diskconfig-readwriteonce.yaml
   - command: kubectl apply -f diskconfig-readwritesame.yaml
   - command: kubectl create deployment --image=nginx:1.23 nginx
-  - command: kubectl apply -f diskconfig-readwritedaemon.yaml
+  - command: kubectl apply -n kube-system -f diskconfig-readwritedaemon.yaml
   - command: kubectl apply -f https://k8s.io/examples/controllers/daemonset.yaml
   - command: kubectl create ns pod-with-host-pid
   - command: kubectl apply -n pod-with-host-pid -f diskconfig-readwriteonce.yaml

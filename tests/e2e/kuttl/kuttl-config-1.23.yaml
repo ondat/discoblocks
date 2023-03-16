@@ -3,6 +3,7 @@ kind: TestSuite
 testDirs:
 - ./tests/e2e/stable
 startKIND: true
+skipClusterDelete: true
 kindConfig: tests/e2e/kind/kind-config-1.23.yaml
 kindNodeCache: true
 kindContainers:

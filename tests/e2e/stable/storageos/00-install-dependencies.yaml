@@ -7,8 +7,3 @@ commands:
   - command: kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/v6.0.1/client/config/crd/snapshot.storage.k8s.io_volumesnapshotclasses.yaml
   - command: kubectl storageos install --include-etcd --etcd-replicas 1 --stos-version=v2.10.0 --wait
     timeout: 500
-  # Workarund, otherwise cluster deletion times out!
-  - command: kubectl scale -n storageos --replicas=0 deploy/storageos-operator
-  - command: sleep 5
-  - command: kubectl patch stos -n storageos storageoscluster -p '{"metadata":{"finalizers":null}}' --type=merge
-  - command: kubectl delete stos -n storageos storageoscluster

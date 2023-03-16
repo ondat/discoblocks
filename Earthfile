@@ -133,7 +133,7 @@ build-image:
 scan-image:
     FROM earthly/dind:alpine
     WITH DOCKER --load local/discoblocks:trivy=+build-image --pull aquasec/trivy:0.38.1
-        RUN docker run -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.38.1 image -f sarif -o trivy-results.sarif -s 'CRITICAL,HIGH' local/discoblocks:trivy
+        RUN docker run -w /workdir -v ${PWD}:/workdir -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.38.1 image -f sarif -o trivy-results.sarif -s 'CRITICAL,HIGH' local/discoblocks:trivy
     END
 
     SAVE ARTIFACT --if-exists trivy-results.sarif AS LOCAL trivy-results.sarif
