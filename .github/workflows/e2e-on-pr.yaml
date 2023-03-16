@@ -47,12 +47,12 @@ jobs:
       run: make gosec
     - name: run test
       run: make test
-    - name: run e2e test
-      run: make e2e-test
     - name: run image scan
       run: make scan-image
     - name: generate bundle manifest
       run: make bundle
+    - name: run e2e test
+      run: make e2e-test
     - name: upload Trivy scan results to GitHub Security tab
       if: always()
       uses: github/codeql-action/upload-sarif@1fc1008278d05ba9455caf083444e6c5a1a3cfd8
