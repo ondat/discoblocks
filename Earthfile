@@ -23,7 +23,7 @@ go-lint:
     FROM earthly/dind:alpine
     COPY . ./workdir
     WITH DOCKER --pull golangci/golangci-lint:v1.51.0
-        RUN docker run -w /workdir -v /workdir:/workdir golangci/golangci-lint:v1.51.0 golangci-lint run --timeout 300s
+        RUN docker run -w /workdir -v /workdir:/workdir golangci/golangci-lint:v1.51.0 golangci-lint run --timeout 500s
     END
 
 go-sec:

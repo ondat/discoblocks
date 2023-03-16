@@ -60,15 +60,15 @@ vet: ## Run go vet against code.
 
 .PHONY: lint
 lint: earthly
-	$(EARTHLY) -P +go-lint
+	$(EARTHLY) -P +go-lint --REGISTRY=$(REGISTRY) --IMAGE_NAME=$(IMAGE_NAME) --IMAGE_TAG=$(IMAGE_TAG)
 
 .PHONY: gosec
 gosec: earthly
-	$(EARTHLY) -P +go-sec
+	$(EARTHLY) -P +go-sec --REGISTRY=$(REGISTRY) --IMAGE_NAME=$(IMAGE_NAME) --IMAGE_TAG=$(IMAGE_TAG)
 
 .PHONY: test
 test: earthly  ## Run tests.
-	$(EARTHLY) -P +go-test
+	$(EARTHLY) -P +go-test --REGISTRY=$(REGISTRY) --IMAGE_NAME=$(IMAGE_NAME) --IMAGE_TAG=$(IMAGE_TAG)
 
 _test: manifests generate fmt vet build-drivers envtest
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test -ldflags "$(LDF_FLAGS)" ./... -coverprofile cover.out
@@ -106,7 +106,7 @@ build-drivers: ## Build CSI driver WASIs.
 
 .PHONY: scan-image
 scan-image: earthly ## Run image scan.
-	$(EARTHLY) -P +scan-image
+	$(EARTHLY) -P +scan-image --REGISTRY=$(REGISTRY) --IMAGE_NAME=$(IMAGE_NAME) --IMAGE_TAG=$(IMAGE_TAG)
 
 ##@ Deployment
 
