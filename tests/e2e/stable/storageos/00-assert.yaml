@@ -4,7 +4,11 @@ timeout: 500
 collectors:
   - type: events
     namespace: storageos
-    selector: app=storageos
+  - type: command
+    command: kubectl get po -A -o wide
+  - type: command
+    command: kubectl get stos -n storageos storageoscluster -o yaml
 commands:
+  - command: sleep 120
   - script: "test $(kubectl get deploy -n cert-manager cert-manager -o jsonpath='{.status.availableReplicas}') = 1"
   - script: "test $(kubectl get stos -n storageos storageoscluster -o jsonpath='{.status.phase}') = Running"
