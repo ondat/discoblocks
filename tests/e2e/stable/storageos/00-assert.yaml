@@ -33,33 +33,27 @@ spec:
   storageClassName: storageos
 status:
   conditions:
-  - lastTransitionTime: "2023-03-17T11:23:55Z"
-    message: Scheduler Ready
+  - message: Scheduler Ready
     reason: Ready
     status: "True"
     type: SchedulerReady
-  - lastTransitionTime: "2023-03-17T11:25:06Z"
-    message: Node Ready
+  - message: Node Ready
     reason: Ready
     status: "True"
     type: NodeReady
-  - lastTransitionTime: "2023-03-17T11:48:41Z"
-    message: APIManager Ready
+  - message: APIManager Ready
     reason: Ready
     status: "True"
     type: APIManagerReady
-  - lastTransitionTime: "2023-03-17T11:49:04Z"
-    message: CSI Ready
+  - message: CSI Ready
     reason: Ready
     status: "True"
     type: CSIReady
-  - lastTransitionTime: "2023-03-17T11:48:29Z"
-    message: CLI Ready
+  - message: CLI Ready
     reason: Ready
     status: "True"
     type: CLIReady
-  - lastTransitionTime: "2023-03-17T11:49:04Z"
-    message: Cluster Ready
+  - message: Cluster Ready
     reason: Ready
     status: "True"
     type: Ready
