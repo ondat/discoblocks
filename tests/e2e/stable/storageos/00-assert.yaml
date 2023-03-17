@@ -1,6 +1,6 @@
 apiVersion: kuttl.dev/v1beta1
 kind: TestAssert
-timeout: 500
+timeout: 360
 collectors:
   - type: events
     namespace: storageos
@@ -9,7 +9,7 @@ collectors:
   - type: command
     command: kubectl get stos -n storageos storageoscluster -o yaml
   - type: command
-    command: kubectl logs -n storageos -l app=storageos
+    command: kubectl logs -n storageos -l app.kubernetes.io/component
 commands:
   - command: sleep 10
   - script: "test $(kubectl get deploy -n cert-manager cert-manager -o jsonpath='{.status.availableReplicas}') = 1"
