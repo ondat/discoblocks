@@ -1,6 +1,16 @@
 apiVersion: kuttl.dev/v1
 kind: TestAssert
 timeout: 15
+collectors:
+  - type: events
+    namespace: default
+  - type: events
+    namespace: kube-system
+  - type: command
+    command: kubectl get po -A -o wide
+  - type: command
+    command: kubectl logs -n kube-system -l app=discoblocks
+---
 commands:
   - script: kubectl exec $(kubectl get po | tail -1 | awk '{print $1}') -- ls -l /media/discoblocks/once-0
   - script: kubectl exec $(kubectl get po | tail -1 | awk '{print $1}') -- ls -l /media/discoblocks/same-0/data0

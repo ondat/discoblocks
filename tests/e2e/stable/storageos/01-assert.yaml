@@ -1,3 +1,14 @@
+apiVersion: kuttl.dev/v1beta1
+kind: TestAssert
+timeout: 180
+collectors:
+  - type: events
+    namespace: kube-system
+  - type: command
+    command: kubectl get po -A -o wide
+  - type: command
+    command: kubectl logs -n kube-system -l app=discoblocks
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:

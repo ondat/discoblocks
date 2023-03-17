@@ -12,9 +12,6 @@ collectors:
     command: kubectl logs -n storageos -l app.kubernetes.io/component
   - type: command
     command: kubectl get sa -n storageos -o yaml
-commands:
-  - command: sleep 10
-  - script: "test $(kubectl get stos -n storageos storageoscluster -o jsonpath='{.status.phase}') = Running"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -22,4 +19,52 @@ metadata:
   name: cert-manager
   namespace: cert-manager
 status:
-  availableReplicas: 0
+  availableReplicas: 1
+---
+apiVersion: storageos.com/v1
+kind: StorageOSCluster
+metadata:
+  name: storageoscluster
+  namespace: storageos
+spec:
+  kvBackend:
+    address: storageos-etcd.storageos-etcd:2379
+  secretRefName: storageos-api
+  storageClassName: storageos
+status:
+  conditions:
+  - lastTransitionTime: "2023-03-17T11:23:55Z"
+    message: Scheduler Ready
+    reason: Ready
+    status: "True"
+    type: SchedulerReady
+  - lastTransitionTime: "2023-03-17T11:25:06Z"
+    message: Node Ready
+    reason: Ready
+    status: "True"
+    type: NodeReady
+  - lastTransitionTime: "2023-03-17T11:48:41Z"
+    message: APIManager Ready
+    reason: Ready
+    status: "True"
+    type: APIManagerReady
+  - lastTransitionTime: "2023-03-17T11:49:04Z"
+    message: CSI Ready
+    reason: Ready
+    status: "True"
+    type: CSIReady
+  - lastTransitionTime: "2023-03-17T11:48:29Z"
+    message: CLI Ready
+    reason: Ready
+    status: "True"
+    type: CLIReady
+  - lastTransitionTime: "2023-03-17T11:49:04Z"
+    message: Cluster Ready
+    reason: Ready
+    status: "True"
+    type: Ready
+  members:
+    ready:
+    - 172.18.0.2
+  phase: Running
+  ready: 1/1
