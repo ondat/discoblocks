@@ -14,5 +14,12 @@ collectors:
     command: kubectl get sa -n storageos -o yaml
 commands:
   - command: sleep 10
-  - script: "test $(kubectl get deploy -n cert-manager cert-manager -o jsonpath='{.status.availableReplicas}') = 1"
   - script: "test $(kubectl get stos -n storageos storageoscluster -o jsonpath='{.status.phase}') = Running"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cert-manager
+  namespace: cert-manager
+status:
+  availableReplicas: 0
