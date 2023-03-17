@@ -1,7 +1,10 @@
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: cert-manager
-  namespace: cert-manager
-status:
-  availableReplicas: 1
+apiVersion: kuttl.dev/v1beta1
+kind: TestAssert
+timeout: 500
+collectors:
+  - type: events
+    namespace: storageos
+    selector: app=storageos
+commands:
+  - script: "test $(kubectl get deploy -n cert-manager cert-manager -o jsonpath='{.status.availableReplicas}') = 1"
+  - script: "test $(kubectl get stos -n storageos storageoscluster -o jsonpath='{.status.phase}') = Running"

@@ -1,5 +1,5 @@
 VERSION --use-cache-command 0.7
-FROM golang:1.18
+FROM golang:1.18.10
 WORKDIR /workdir
 ARG --global KUBE_VERSION=1.23
 ARG --global REGISTRY=ghcr.io
