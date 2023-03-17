@@ -63,8 +63,5 @@ status:
     reason: Ready
     status: "True"
     type: Ready
-  members:
-    ready:
-    - 172.18.0.2
   phase: Running
   ready: 1/1
