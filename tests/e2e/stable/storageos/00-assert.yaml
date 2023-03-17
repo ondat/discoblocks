@@ -10,6 +10,8 @@ collectors:
     command: kubectl get stos -n storageos storageoscluster -o yaml
   - type: command
     command: kubectl logs -n storageos -l app.kubernetes.io/component
+  - type: command
+    command: kubectl get sa -n storageos -o yaml
 commands:
   - command: sleep 10
   - script: "test $(kubectl get deploy -n cert-manager cert-manager -o jsonpath='{.status.availableReplicas}') = 1"

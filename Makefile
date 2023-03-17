@@ -79,10 +79,6 @@ e2e-test: earthly  ## Run e2e tests.
 
 ##@ Build
 
-.PHONY: tidy
-tidy:
-	go mod tidy
-
 .PHONY: build
 build: generate fmt vet ## Build manager binary.
 	go build -ldflags "$(LDF_FLAGS)" -o bin/manager main.go
