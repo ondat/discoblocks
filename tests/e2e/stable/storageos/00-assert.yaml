@@ -8,7 +8,9 @@ collectors:
     command: kubectl get po -A -o wide
   - type: command
     command: kubectl get stos -n storageos storageoscluster -o yaml
+  - type: command
+    command: kubectl logs -n storageos -l app=storageos
 commands:
-  - command: sleep 120
+  - command: sleep 10
   - script: "test $(kubectl get deploy -n cert-manager cert-manager -o jsonpath='{.status.availableReplicas}') = 1"
   - script: "test $(kubectl get stos -n storageos storageoscluster -o jsonpath='{.status.phase}') = Running"
