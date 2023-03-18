@@ -1,15 +1,14 @@
 
 # Image URL to use all building/pushing image targets
-IMG ?= discoblocks:latest
+REGISTRY ?= ghcr.io
+IMAGE_NAME ?= discoblocks
+IMAGE_TAG ?= latest
+IMG = $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
+
+E2E_TIMEOUT ?= 240
+
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.23
-
-# Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
-ifeq (,$(shell go env GOBIN))
-GOBIN=$(shell go env GOPATH)/bin
-else
-GOBIN=$(shell go env GOBIN)
-endif
 
 LDF_FLAGS = -X github.com/ondat/discoblocks/pkg/drivers.DriversDir=$(PWD)/drivers
 
@@ -42,7 +41,7 @@ help: ## Display this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 ##@ Development
-
+ 
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
@@ -59,9 +58,24 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
+.PHONY: lint
+lint: earthly
+	$(EARTHLY) -P +go-lint --REGISTRY=$(REGISTRY) --IMAGE_NAME=$(IMAGE_NAME) --IMAGE_TAG=$(IMAGE_TAG)
+
+.PHONY: gosec
+gosec: earthly
+	$(EARTHLY) -P +go-sec --REGISTRY=$(REGISTRY) --IMAGE_NAME=$(IMAGE_NAME) --IMAGE_TAG=$(IMAGE_TAG)
+
 .PHONY: test
-test: manifests generate fmt vet build-drivers envtest ## Run tests.
+test: earthly  ## Run tests.
+	$(EARTHLY) -P +go-test --REGISTRY=$(REGISTRY) --IMAGE_NAME=$(IMAGE_NAME) --IMAGE_TAG=$(IMAGE_TAG)
+
+_test: manifests generate fmt vet build-drivers envtest
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test -ldflags "$(LDF_FLAGS)" ./... -coverprofile cover.out
+
+.PHONY: e2e-test
+e2e-test: earthly  ## Run e2e tests.
+	$(EARTHLY) -P +e2e-test --REGISTRY=$(REGISTRY) --IMAGE_NAME=$(IMAGE_NAME) --IMAGE_TAG=$(IMAGE_TAG) --TIMEOUT=$(E2E_TIMEOUT)
 
 ##@ Build
 
@@ -74,17 +88,21 @@ run: manifests generate fmt vet ## Run a controller from your host.
 	go run -ldflags "$(LDF_FLAGS)" ./main.go
 
 .PHONY: docker-build
-docker-build: test ## Build docker image with the manager.
-	docker build -t ${IMG} .
+docker-build: earthly ## Build docker image with the manager.
+	$(EARTHLY) -P +build-all-images --REGISTRY=$(REGISTRY) --IMAGE_NAME=$(IMAGE_NAME) --IMAGE_TAG=$(IMAGE_TAG)
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
-	docker push ${IMG}
+	$(EARTHLY) --push -P +build-all-images --REGISTRY=$(REGISTRY) --IMAGE_NAME=$(IMAGE_NAME) --IMAGE_TAG=$(IMAGE_TAG)
 
 .PHONY: build-drivers
-build-drivers: ## Build CSI driver WASIs
+build-drivers: ## Build CSI driver WASIs.
 	docker run -v $(PWD)/drivers:/go/src -w /go/src/csi.storageos.com tinygo/tinygo:0.23.0 bash -c "go mod tidy && tinygo build -o main.wasm -target wasi --no-debug main.go"
 	docker run -v $(PWD)/drivers:/go/src -w /go/src/ebs.csi.aws.com tinygo/tinygo:0.23.0 bash -c "go mod tidy && tinygo build -o main.wasm -target wasi --no-debug main.go"
+
+.PHONY: scan-image
+scan-image: earthly ## Run image scan.
+	$(EARTHLY) -P +scan-image --REGISTRY=$(REGISTRY) --IMAGE_NAME=$(IMAGE_NAME) --IMAGE_TAG=$(IMAGE_TAG)
 
 ##@ Deployment
 
@@ -93,15 +111,21 @@ ifndef ignore-not-found
 endif
 
 .PHONY: install
-install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
+install: manifests kustomize _install ## Install CRDs into the K8s cluster specified in ~/.kube/config.
+
+_install:
 	$(KUSTOMIZE) build config/crd | kubectl apply -f -
 
 .PHONY: uninstall
-uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
+uninstall: manifests kustomize _uninstall ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
+
+_uninstall:
 	$(KUSTOMIZE) build config/crd | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
 
 .PHONY: deploy
-deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+deploy: manifests kustomize _deploy ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+
+_deploy:
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default | kubectl apply -f -
 	cd config/manager && $(KUSTOMIZE) edit set image controller=discoblocks:latest
@@ -111,11 +135,14 @@ undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/confi
 	$(KUSTOMIZE) build config/default | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
 
 .PHONY: bundle
-bundle: manifests kustomize ## Generates Kubernetes manifests
+bundle: earthly ## Generates Kubernetes manifests
+	$(EARTHLY) -P +bundle --REGISTRY=$(REGISTRY) --IMAGE_NAME=$(IMAGE_NAME) --IMAGE_TAG=$(IMAGE_TAG)
+
+_bundle:
 	rm -rf discoblocks-bundle.yaml
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default > discoblocks-bundle.yaml
-	cd config/manager && $(KUSTOMIZE) edit set image controller=discoblocks:latest
+	(cd config ; tar -czvf ../discoblocks-kustomize.tar.gz .)
 
 .PHONY: deploy-prometheus
 deploy-prometheus: ## Deploy prometheus to the K8s cluster specified in ~/.kube/config.
@@ -137,31 +164,47 @@ deploy-cert-manager: ## Deploy cert manager to the K8s cluster specified in ~/.k
 undeploy-cert-manager: ## Undeploy cert manager from the K8s cluster specified in ~/.kube/config.
 	kubectl delete -f https://github.com/cert-manager/cert-manager/releases/download/v1.8.0/cert-manager.yaml
 
-CONTROLLER_GEN = $(shell pwd)/bin/controller-gen
+CONTROLLER_GEN ?= $(shell pwd)/bin/controller-gen
 .PHONY: controller-gen
 controller-gen: ## Download controller-gen locally if necessary.
 	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@v0.8.0)
 
-KUSTOMIZE = $(shell pwd)/bin/kustomize
+KUSTOMIZE ?= $(shell pwd)/bin/kustomize
 .PHONY: kustomize
 kustomize: ## Download kustomize locally if necessary.
 	$(call go-get-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v4@v4.5.7)
 
-ENVTEST = $(shell pwd)/bin/setup-envtest
+ENVTEST ?= $(shell pwd)/bin/setup-envtest
 .PHONY: envtest
 envtest: ## Download envtest-setup locally if necessary.
 	$(call go-get-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest@latest)
 
-KUBEBUILDER = $(shell pwd)/bin/kubebuilder
+KUBEBUILDER ?= $(shell pwd)/bin/kubebuilder
 .PHONY: kubebuilder
 kubebuilder: ## Download kubebuilder locally if necessary.
-	curl -L -o $(KUBEBUILDER) https://github.com/kubernetes-sigs/kubebuilder/releases/download/v3.3.0/kubebuilder_$(shell uname | tr '[:upper:]' '[:lower:]')_amd64
+ifeq (,$(wildcard $(KUBEBUILDER)))
+	curl -sL -o $(KUBEBUILDER) https://github.com/kubernetes-sigs/kubebuilder/releases/download/v3.3.0/kubebuilder_$(shell uname | tr '[:upper:]' '[:lower:]')_amd64
 	chmod +x $(KUBEBUILDER)
+endif
 
-HUSKY = $(shell pwd)/bin/husky
+HUSKY ?= $(shell pwd)/bin/husky
 .PHONY: husky
 husky: ## Download husky locally if necessary.
 	$(call go-get-tool,$(HUSKY),github.com/automation-co/husky@v0.2.14)
+
+EARTHLY ?= $(shell pwd)/bin/earthly
+earthly:
+ifeq (,$(wildcard $(EARTHLY)))
+	curl -sL https://github.com/earthly/earthly/releases/download/v0.7.1/earthly-linux-amd64 -o $(EARTHLY)
+	chmod +x $(EARTHLY)
+endif
+
+# Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
+ifeq (,$(shell go env GOBIN))
+GOBIN=$(shell go env GOPATH)/bin
+else
+GOBIN=$(shell go env GOBIN)
+endif
 
 # go-get-tool will 'go get' any package $2 and install it to $1.
 PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))

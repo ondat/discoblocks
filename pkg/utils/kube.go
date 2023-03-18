@@ -38,7 +38,7 @@ securityContext:
 `
 
 const metricsProxyTeamplate = `name: discoblocks-metrics-proxy
-image: nixery.dev/shell/frp
+image: "%s"
 command:
 - sh
 - -c
@@ -78,40 +78,40 @@ volumeMounts:
 const hostJobTemplate = `apiVersion: batch/v1
 kind: Job
 metadata:
-  name: "%s"
-  namespace: "%s"
+  name: "%[1]s"
+  namespace: "%[2]s"
   labels:
     app: discoblocks
   annotations:
-    discoblocks/operation: "%s"
-    discoblocks/pod: "%s"
-    discoblocks/pvc: "%s"
+    discoblocks/operation: "%[3]s"
+    discoblocks/pod: "%[4]s"
+    discoblocks/pvc: "%[5]s"
 spec:
   template:
     spec:
       hostPID: true
-      nodeName: "%s"
+      nodeName: "%[6]s"
       containers:
       - name: mount
-        image: nixery.dev/shell/gawk/gnugrep/gnused/coreutils-full/cri-tools/docker-client/nerdctl/nvme-cli
+        image: "%[7]s"
         env:
         - name: MOUNT_POINT
-          value: "%s"
+          value: "%[8]s"
         - name: CONTAINER_IDS
-          value: "%s"
+          value: "%[9]s"
         - name: PVC_NAME
-          value: "%s"
+          value: "%[5]s"
         - name: PV_NAME
-          value: "%s"
+          value: "%[10]s"
         - name: FS
-          value: "%s"
+          value: "%[11]s"
         - name: VOLUME_ATTACHMENT_META
-          value: "%s"
+          value: "%[12]s"
         command:
         - bash
         - -exc
         - |
-          %s
+          %[13]s
         volumeMounts:
         - mountPath: /run/containerd/containerd.sock
           name: containerd-socket
@@ -176,9 +176,9 @@ func RenderMetricsSidecar() (*corev1.Container, error) {
 }
 
 // RenderMetricsProxySidecar returns the metrics sidecar
-func RenderMetricsProxySidecar(name, namespace string) (*corev1.Container, error) {
+func RenderMetricsProxySidecar(image, name, namespace string) (*corev1.Container, error) {
 	sidecar := corev1.Container{}
-	if err := yaml.Unmarshal([]byte(fmt.Sprintf(metricsProxyTeamplate, namespace, name)), &sidecar); err != nil {
+	if err := yaml.Unmarshal([]byte(fmt.Sprintf(metricsProxyTeamplate, image, namespace, name)), &sidecar); err != nil {
 		return nil, fmt.Errorf("unable to unmarshal container: %w", err)
 	}
 
@@ -186,7 +186,7 @@ func RenderMetricsProxySidecar(name, namespace string) (*corev1.Container, error
 }
 
 // RenderMountJob returns the mount job executed on host
-func RenderMountJob(podName, pvcName, pvName, namespace, nodeName, fs, mountPoint string, containerIDs []string, preMountCommand, volumeMeta string, owner metav1.OwnerReference) (*batchv1.Job, error) {
+func RenderMountJob(image, podName, pvcName, pvName, namespace, nodeName, fs, mountPoint string, containerIDs []string, preMountCommand, volumeMeta string, owner metav1.OwnerReference) (*batchv1.Job, error) {
 	if preMountCommand != "" {
 		preMountCommand += " && "
 	}
@@ -199,7 +199,7 @@ func RenderMountJob(podName, pvcName, pvName, namespace, nodeName, fs, mountPoin
 		return nil, fmt.Errorf("unable to render resource name: %w", err)
 	}
 
-	template := fmt.Sprintf(hostJobTemplate, jobName, namespace, "mount", podName, pvcName, nodeName, mountPoint, strings.Join(containerIDs, " "), pvcName, pvName, fs, volumeMeta, mountCommand)
+	template := fmt.Sprintf(hostJobTemplate, jobName, namespace, "mount", podName, pvcName, nodeName, image, mountPoint, strings.Join(containerIDs, " "), pvName, fs, volumeMeta, mountCommand)
 
 	job := batchv1.Job{}
 	if err := yaml.Unmarshal([]byte(template), &job); err != nil {
@@ -215,7 +215,7 @@ func RenderMountJob(podName, pvcName, pvName, namespace, nodeName, fs, mountPoin
 }
 
 // RenderResizeJob returns the resize job executed on host
-func RenderResizeJob(podName, pvcName, pvName, namespace, nodeName, fs, preResizeCommand, volumeMeta string, owner metav1.OwnerReference) (*batchv1.Job, error) {
+func RenderResizeJob(image, podName, pvcName, pvName, namespace, nodeName, fs, preResizeCommand, volumeMeta string, owner metav1.OwnerReference) (*batchv1.Job, error) {
 	if preResizeCommand != "" {
 		preResizeCommand += " && "
 	}
@@ -228,7 +228,7 @@ func RenderResizeJob(podName, pvcName, pvName, namespace, nodeName, fs, preResiz
 		return nil, fmt.Errorf("unable to render resource name: %w", err)
 	}
 
-	template := fmt.Sprintf(hostJobTemplate, jobName, namespace, "resize", podName, pvcName, nodeName, "", "", pvcName, pvName, fs, volumeMeta, resizeCommand)
+	template := fmt.Sprintf(hostJobTemplate, jobName, namespace, "resize", podName, pvcName, nodeName, image, "", "", pvName, fs, volumeMeta, resizeCommand)
 
 	job := batchv1.Job{}
 	if err := yaml.Unmarshal([]byte(template), &job); err != nil {

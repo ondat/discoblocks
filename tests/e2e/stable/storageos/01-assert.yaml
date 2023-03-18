@@ -1,3 +1,38 @@
+apiVersion: kuttl.dev/v1beta1
+kind: TestAssert
+timeout: 180
+collectors:
+  - type: events
+    namespace: kube-system
+  - type: command
+    command: kubectl get po -A -o wide
+  - type: command
+    command: kubectl logs -n kube-system -l app=discoblocks
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: discoblocks-manager-config
+  namespace: kube-system
+data:
+  controller_manager_config.yaml: |
+    apiVersion: config.discoblocks.ondat.io/v1
+    kind: OperatorConfig
+    health:
+      bindAddress: :8080
+      healthProbeBindAddress: :8081
+    metrics:
+      bindAddress: 127.0.0.1:8080
+    webhook:
+      port: 9443
+    supportedCsiDrivers:
+    - ebs.csi.aws.com
+    - csi.storageos.com
+    jobContainerImage: local/discoblocks:job-e2e
+    proxyContainerImage: local/discoblocks:proxy-e2e
+    schedulerStrictMode: true
+    mutatorStrictMode: true
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:

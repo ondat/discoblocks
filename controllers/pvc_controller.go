@@ -58,9 +58,10 @@ type nodeCache interface {
 
 // PVCReconciler reconciles a PVC object
 type PVCReconciler struct {
-	EventService utils.EventService
-	NodeCache    nodeCache
-	InProgress   sync.Map
+	OperationImage string
+	EventService   utils.EventService
+	NodeCache      nodeCache
+	InProgress     sync.Map
 	client.Client
 	Scheme *runtime.Scheme
 }
@@ -195,6 +196,7 @@ func (r *PVCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 }
 
 // MonitorVolumes monitors volumes periodycally
+//
 //nolint:gocyclo // It is complex we know
 func (r *PVCReconciler) MonitorVolumes() {
 	logger := logf.Log.WithName("VolumeMonitor")
@@ -876,7 +878,7 @@ WAIT_CSI:
 
 	mountpoint := utils.RenderMountPoint(config.Spec.MountPointPattern, config.Name, nextIndex)
 
-	mountJob, err := utils.RenderMountJob(pod.Name, pvc.Name, pvc.Spec.VolumeName, pvc.Namespace, nodeName, pv.Spec.CSI.FSType, mountpoint, containerIDs, preMountCmd, volumeMeta, metav1.OwnerReference{
+	mountJob, err := utils.RenderMountJob(r.OperationImage, pod.Name, pvc.Name, pvc.Spec.VolumeName, pvc.Namespace, nodeName, pv.Spec.CSI.FSType, mountpoint, containerIDs, preMountCmd, volumeMeta, metav1.OwnerReference{
 		APIVersion: parentPVC.APIVersion,
 		Kind:       parentPVC.Kind,
 		Name:       pvc.Name,
@@ -1105,7 +1107,7 @@ func (r *PVCReconciler) resizePVC(config *discoblocksondatiov1.DiskConfig, pod *
 		return
 	}
 
-	resizeJob, err := utils.RenderResizeJob(pod.Name, pvc.Name, pvc.Spec.VolumeName, pvc.Namespace, nodeName, pv.Spec.CSI.FSType, preResizeCmd, volumeMeta, metav1.OwnerReference{
+	resizeJob, err := utils.RenderResizeJob(r.OperationImage, pod.Name, pvc.Name, pvc.Spec.VolumeName, pvc.Namespace, nodeName, pv.Spec.CSI.FSType, preResizeCmd, volumeMeta, metav1.OwnerReference{
 		APIVersion: pvc.APIVersion,
 		Kind:       pvc.Kind,
 		Name:       pvc.Name,

@@ -19,29 +19,8 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  IMAGE_TAG: ${{ github.sha }}
+  IMAGE_TAG: ${{ github.ref_name }}
 jobs:
-  test:
-    uses: ./.github/workflows/_test.yml
-
-  golangci-lint:
-    uses: ./.github/workflows/_gocilint.yml
-
-  gosec-scanning:
-    uses: ./.github/workflows/_gosecscan.yml
-
-  image-build:
-    uses: ./.github/workflows/_docker-build.yml
-    needs: [test, golangci-lint, gosec-scanning]
-
-  image-vulnerability-scan:
-    uses: ./.github/workflows/_trivy.yml
-    needs: image-build
-
-  kuttl:
-    uses: ./.github/workflows/_kuttl.yml
-    needs: image-build
-
   auto-pre-release:
     if: startsWith(github.ref, 'refs/tags/v') && (contains(github.ref_name, '-alpha.') || contains(github.ref_name, '-beta.'))
     runs-on: ubuntu-latest
@@ -49,7 +28,11 @@ jobs:
       contents: write
       packages: write
     steps:
-      - name: Checkout
+      - name: harden runner
+        uses: step-security/harden-runner@9b0655f430fba8c7001d4e38f8d4306db5c6e0ab
+        with:
+          egress-policy: audit
+      - name: checkout
         uses: actions/checkout@a12a3943b4bdde767164f792f33f40b04645d846
         with:
           fetch-depth: 0
@@ -59,29 +42,57 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Tag and push image
-        run: |
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-      - name: Generate bundle manifest
+      - name: restore cache Earthly build
+        uses: actions/cache/restore@v3
+        with:
+          path: /var/lib/docker/volumes/earthly-cache/
+          key: earthly-cache
+      - name: run golangci-lint
+        run: make lint
+      - name: run gosec scan
+        run: make gosec
+      - name: run test
+        run: make test
+      - name: run image scan
+        run: make scan-image
+      - name: generate bundle manifest
         run: make bundle
-        env:
-          IMG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-      - name: Compress Kustomize manifests
-        run: (cd config ; tar -czvf ../discoblocks-kustomize.tar.gz .)
-      - name: Set since tag
+      - name: run e2e test
+        run: make e2e-test
+      - name: upload Kind logs
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: kind-logs
+          path: kind-logs-*
+      - name: upload Trivy scan results to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@1fc1008278d05ba9455caf083444e6c5a1a3cfd8
+        with:
+          sarif_file: 'trivy-results.sarif'
+      - name: set owner of earthly cache
+        if: always()
+        run: sudo chown -R $(whoami) /var/lib/docker/volumes/earthly-cache
+      - name: save cache Earthly build
+        if: always()
+        uses: actions/cache/save@v3
+        with:
+          path: /var/lib/docker/volumes/earthly-cache/
+          key: earthly-cache
+      - name: push images
+        run: make docker-push
+      - name: set since tag
         run: echo "SINCE_TAG=$(git describe --tags --always $(git rev-list --tags) | grep -e '^v[0-9]+*\.[0-9]+*\.[0-9]+*$' | head -1)" >> $GITHUB_ENV
-      - name: "Generate release changelog"
+      - name: generate release changelog
         uses: heinrichreimer/github-changelog-generator-action@6f5b9494dd265d6fb7243a10c53dc0169c55f247
         with:
           token: ${{ secrets.GITHUB_TOKEN }} 
           base: .github/RELEASE_TEMPLATE.md
           sinceTag: ${{ env.SINCE_TAG }}
           simpleList: true
-      - name: Fix version in changelog
+      - name: fix version in changelog
         run: sed -i "s/#VERSION#/${{ github.ref_name }}/g" CHANGELOG.md
-      - name: Create pre-release
+      - name: create pre-release
         uses: softprops/action-gh-release@1e07f4398721186383de40550babbdf2b84acfc5
         with:
           prerelease: true
@@ -89,7 +100,6 @@ jobs:
           files: |
             discoblocks-bundle.yaml
             discoblocks-kustomize.tar.gz
-    needs: [image-vulnerability-scan, kuttl]
 
   auto-release:
     if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-alpha.') && !contains(github.ref_name, '-beta.')
@@ -98,7 +108,11 @@ jobs:
       contents: write
       packages: write
     steps:
-      - name: Checkout
+      - name: harden runner
+        uses: step-security/harden-runner@9b0655f430fba8c7001d4e38f8d4306db5c6e0ab
+        with:
+          egress-policy: audit
+      - name: checkout
         uses: actions/checkout@a12a3943b4bdde767164f792f33f40b04645d846
         with:
           fetch-depth: 0
@@ -108,29 +122,57 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Tag and push image
-        run: |
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-      - name: Generate bundle manifest
+      - name: restore cache Earthly build
+        uses: actions/cache/restore@v3
+        with:
+          path: /var/lib/docker/volumes/earthly-cache/
+          key: earthly-cache
+      - name: run golangci-lint
+        run: make lint
+      - name: run gosec scan
+        run: make gosec
+      - name: run test
+        run: make test
+      - name: run image scan
+        run: make scan-image
+      - name: generate bundle manifest
         run: make bundle
-        env:
-          IMG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-      - name: Compress Kustomize manifests
-        run: (cd config ; tar -czvf ../discoblocks-kustomize.tar.gz .)
-      - name: Set since tag
+      - name: run e2e test
+        run: make e2e-test
+      - name: upload Kind logs
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: kind-logs
+          path: kind-logs-*
+      - name: upload Trivy scan results to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@1fc1008278d05ba9455caf083444e6c5a1a3cfd8
+        with:
+          sarif_file: 'trivy-results.sarif'
+      - name: set owner of earthly cache
+        if: always()
+        run: sudo chown -R $(whoami) /var/lib/docker/volumes/earthly-cache
+      - name: save cache Earthly build
+        if: always()
+        uses: actions/cache/save@v3
+        with:
+          path: /var/lib/docker/volumes/earthly-cache/
+          key: earthly-cache
+      - name: push images
+        run: make docker-push
+      - name: set since tag
         run: echo "SINCE_TAG=$(git describe --tags --always $(git rev-list --tags) | grep -e '^v[0-9]+*\.[0-9]+*\.[0-9]+*$' | head -2 | tail -1)" >> $GITHUB_ENV
-      - name: "Generate release changelog"
+      - name: generate release changelog
         uses: heinrichreimer/github-changelog-generator-action@6f5b9494dd265d6fb7243a10c53dc0169c55f247
         with:
           token: ${{ secrets.GITHUB_TOKEN }} 
           base: .github/RELEASE_TEMPLATE.md
           sinceTag: ${{ env.SINCE_TAG }}
           simpleList: true
-      - name: Fix version in changelog
+      - name: fix version in changelog
         run: sed -i "s/#VERSION#/${{ github.ref_name }}/g" CHANGELOG.md
-      - name: Create pre-release
+      - name: create pre-release
         uses: softprops/action-gh-release@1e07f4398721186383de40550babbdf2b84acfc5
         with:
           prerelease: false
@@ -138,4 +180,3 @@ jobs:
           files: |
             discoblocks-bundle.yaml
             discoblocks-kustomize.tar.gz
-    needs: [image-vulnerability-scan, kuttl]

@@ -1,3 +1,16 @@
+apiVersion: kuttl.dev/v1beta1
+kind: TestAssert
+timeout: 360
+collectors:
+  - type: events
+    namespace: storageos
+  - type: command
+    command: kubectl get po -A -o wide
+  - type: command
+    command: kubectl get stos -n storageos storageoscluster -o yaml
+  - type: command
+    command: kubectl logs -n storageos -l app.kubernetes.io/component
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -11,6 +24,11 @@ kind: StorageOSCluster
 metadata:
   name: storageoscluster
   namespace: storageos
+spec:
+  kvBackend:
+    address: storageos-etcd.storageos-etcd:2379
+  secretRefName: storageos-api
+  storageClassName: storageos
 status:
   conditions:
   - message: Scheduler Ready
@@ -29,6 +47,10 @@ status:
     reason: Ready
     status: "True"
     type: CSIReady
+  - message: CLI Ready
+    reason: Ready
+    status: "True"
+    type: CLIReady
   - message: Cluster Ready
     reason: Ready
     status: "True"

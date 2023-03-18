@@ -1,4 +1,6 @@
-apiVersion: kuttl.dev/v1beta1
+apiVersion: kuttl.dev/v1
 kind: TestStep
 commands:
-  - command: sh -c 'IMG=local/discoblocks:e2e make -C ../../../.. deploy'
+  - script: sed -i "s|$(grep jobContainerImage ../../../../config/manager/controller_manager_config.yaml | awk '{print $2}')|local/discoblocks:job-e2e|" ../../../../config/manager/controller_manager_config.yaml
+  - script: sed -i "s|$(grep proxyContainerImage ../../../../config/manager/controller_manager_config.yaml | awk '{print $2}')|local/discoblocks:proxy-e2e|" ../../../../config/manager/controller_manager_config.yaml
+  - script: REGISTRY=local IMAGE_NAME=discoblocks IMAGE_TAG=e2e make -C ../../../.. _deploy

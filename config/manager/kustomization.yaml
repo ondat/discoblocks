@@ -6,6 +6,9 @@ resources:
 generatorOptions:
   disableNameSuffixHash: true
 
+patchesStrategicMerge:
+- frps_container_patch.yaml
+
 configMapGenerator:
 - files:
   - controller_manager_config.yaml

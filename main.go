@@ -21,8 +21,6 @@ import (
 	"flag"
 	"net/http"
 	"os"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +28,7 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/klog/v2"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -40,6 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	configdiscoblockv1 "github.com/ondat/discoblocks/api/config.discoblocks.ondat.io/v1"
 	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
 	"github.com/ondat/discoblocks/controllers"
 	"github.com/ondat/discoblocks/mutators"
@@ -49,7 +49,8 @@ import (
 )
 
 const (
-	webhookport = 9443
+	// envPodNamespace is the operator's pod namespace environment variable.
+	envPodNamespace = "POD_NAMESPACE"
 )
 
 var (
@@ -84,20 +85,23 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(discoblocksondatiov1.AddToScheme(scheme))
+	utilruntime.Must(configdiscoblockv1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
 func main() {
 	http.DefaultClient.Timeout = time.Minute
 
-	var metricsAddr string
-	var enableLeaderElection bool
-	var probeAddr string
-	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
-	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
-		"Enable leader election for controller manager. "+
-			"Enabling this will ensure there is only one active controller manager.")
+	var configFile string
+	flag.StringVar(&configFile, "config", "",
+		"The controller will load its initial configuration from this file. "+
+			"Omit this flag to use the default configuration values. ")
+
+	const five = 5
+
+	var leaderRenewSeconds uint
+	flag.UintVar(&leaderRenewSeconds, "leader-renew-seconds", five, "Leader renewal frequency")
+
 	opts := zap.Options{
 		Development: true,
 	}
@@ -108,14 +112,42 @@ func main() {
 	ctrl.SetLogger(zapLogger)
 	klog.SetLogger(zapLogger)
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:                 scheme,
-		MetricsBindAddress:     metricsAddr,
-		Port:                   webhookport,
-		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       controllerID,
-	})
+	currentNS := ""
+	if ns, ok := os.LookupEnv(envPodNamespace); ok {
+		currentNS = ns
+	}
+
+	const ldm = 1.2
+	const two = 2
+
+	renewDeadline := time.Duration(leaderRenewSeconds) * time.Second
+	leaseDuration := time.Duration(int(ldm*float64(leaderRenewSeconds))) * time.Second
+	leaderRetryDuration := renewDeadline / two
+
+	options := ctrl.Options{
+		Scheme:                     scheme,
+		LeaderElection:             true,
+		LeaderElectionID:           controllerID,
+		LeaderElectionNamespace:    currentNS,
+		LeaderElectionResourceLock: resourcelock.LeasesResourceLock,
+		RenewDeadline:              &renewDeadline,
+		LeaseDuration:              &leaseDuration,
+		RetryPeriod:                &leaderRetryDuration,
+	}
+
+	operatorConfig := configdiscoblockv1.OperatorConfig{}
+
+	if configFile != "" {
+		var err error
+		cfg := ctrl.ConfigFile()
+		options, err = options.AndFrom(cfg.AtPath(configFile).OfKind(&operatorConfig))
+		if err != nil {
+			setupLog.Error(err, "unable to load the config file")
+			os.Exit(1)
+		}
+	}
+
+	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), options)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
@@ -150,19 +182,18 @@ func main() {
 	}
 
 	if _, err = (&controllers.PVCReconciler{
-		EventService: eventService,
-		NodeCache:    nodeReconciler,
-		InProgress:   sync.Map{},
-		Client:       mgr.GetClient(),
-		Scheme:       mgr.GetScheme(),
+		OperationImage: operatorConfig.JobContainerImage,
+		EventService:   eventService,
+		NodeCache:      nodeReconciler,
+		InProgress:     sync.Map{},
+		Client:         mgr.GetClient(),
+		Scheme:         mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "PVC")
 		os.Exit(1)
 	}
 
-	provisioners := strings.Split(strings.ReplaceAll(os.Getenv("SUPPORTED_CSI_DRIVERS"), " ", ""), ",")
-
-	discoblocksondatiov1.InitDiskConfigWebhookDeps(mgr.GetClient(), provisioners)
+	discoblocksondatiov1.InitDiskConfigWebhookDeps(mgr.GetClient(), operatorConfig.SupportedCsiDrivers)
 
 	if err = (&discoblocksondatiov1.DiskConfig{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create validator", "validator", "DiskConfig")
@@ -171,13 +202,7 @@ func main() {
 
 	//+kubebuilder:scaffold:builder
 
-	strictMutator, err := parseBoolEnv("MUTATOR_STRICT_MODE")
-	if err != nil {
-		setupLog.Error(err, "unable to parse MUTATOR_STRICT_MODE")
-		os.Exit(1)
-	}
-
-	podMutator := mutators.NewPodMutator(mgr.GetClient(), strictMutator)
+	podMutator := mutators.NewPodMutator(mgr.GetClient(), operatorConfig.MutatorStrictMode, operatorConfig.ProxyContainerImage)
 	mgr.GetWebhookServer().Register("/mutate-v1-pod", &webhook.Admission{Handler: podMutator})
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
@@ -190,13 +215,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	strictScheduler, err := parseBoolEnv("SCHEDULER_STRICT_MODE")
-	if err != nil {
-		setupLog.Error(err, "unable to parse SCHEDULER_STRICT_MODE")
-		os.Exit(1)
-	}
-
-	scheduler := schedulers.NewScheduler(mgr.GetClient(), strictScheduler)
+	scheduler := schedulers.NewScheduler(mgr.GetClient(), operatorConfig.SchedulerStrictMode)
 	schedulerErrChan := scheduler.Start(context.Background())
 	go func() {
 		setupLog.Error(<-schedulerErrChan, "there was an error in scheduler")
@@ -208,13 +227,4 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
-}
-
-func parseBoolEnv(key string) (bool, error) {
-	raw := os.Getenv(key)
-	if raw != "" {
-		return strconv.ParseBool(raw)
-	}
-
-	return false, nil
 }
