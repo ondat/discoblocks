@@ -72,7 +72,7 @@ jobs:
           sarif_file: 'trivy-results.sarif'
       - name: set owner of earthly cache
         if: always()
-        run: chown -R $(whoami) /var/lib/docker/volumes/earthly-cache
+        run: sudo chown -R $(whoami) /var/lib/docker/volumes/earthly-cache
       - name: save cache Earthly build
         if: always()
         uses: actions/cache/save@v3
@@ -152,7 +152,7 @@ jobs:
           sarif_file: 'trivy-results.sarif'
       - name: set owner of earthly cache
         if: always()
-        run: chown -R $(whoami) /var/lib/docker/volumes/earthly-cache
+        run: sudo chown -R $(whoami) /var/lib/docker/volumes/earthly-cache
       - name: save cache Earthly build
         if: always()
         uses: actions/cache/save@v3

@@ -5,4 +5,4 @@ commands:
   - command: kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/v6.0.1/client/config/crd/snapshot.storage.k8s.io_volumesnapshots.yaml
   - command: kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/v6.0.1/client/config/crd/snapshot.storage.k8s.io_volumesnapshotcontents.yaml
   - command: kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/v6.0.1/client/config/crd/snapshot.storage.k8s.io_volumesnapshotclasses.yaml
-  - command: kubectl storageos install --include-etcd --etcd-replicas 1 --stos-version=v2.9.0
+  - command: kubectl storageos install --include-etcd --etcd-replicas 1 --stos-version=v2.10.0
