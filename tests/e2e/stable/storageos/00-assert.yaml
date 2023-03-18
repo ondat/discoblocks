@@ -10,8 +10,6 @@ collectors:
     command: kubectl get stos -n storageos storageoscluster -o yaml
   - type: command
     command: kubectl logs -n storageos -l app.kubernetes.io/component
-  - type: command
-    command: kubectl get sa -n storageos storageos-node -o yaml
 ---
 apiVersion: apps/v1
 kind: Deployment

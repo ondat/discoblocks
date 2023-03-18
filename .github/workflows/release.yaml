@@ -70,6 +70,9 @@ jobs:
         uses: github/codeql-action/upload-sarif@1fc1008278d05ba9455caf083444e6c5a1a3cfd8
         with:
           sarif_file: 'trivy-results.sarif'
+      - name: set owner of earthly cache
+        if: always()
+        run: chown -R $(whoami) /var/lib/docker/volumes/earthly-cache
       - name: save cache Earthly build
         if: always()
         uses: actions/cache/save@v3
@@ -147,6 +150,9 @@ jobs:
         uses: github/codeql-action/upload-sarif@1fc1008278d05ba9455caf083444e6c5a1a3cfd8
         with:
           sarif_file: 'trivy-results.sarif'
+      - name: set owner of earthly cache
+        if: always()
+        run: chown -R $(whoami) /var/lib/docker/volumes/earthly-cache
       - name: save cache Earthly build
         if: always()
         uses: actions/cache/save@v3
