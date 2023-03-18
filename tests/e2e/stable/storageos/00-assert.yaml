@@ -47,10 +47,6 @@ status:
     reason: Ready
     status: "True"
     type: CSIReady
-  - message: CLI Ready
-    reason: Ready
-    status: "True"
-    type: CLIReady
   - message: Cluster Ready
     reason: Ready
     status: "True"
