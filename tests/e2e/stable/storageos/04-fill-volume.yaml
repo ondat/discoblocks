@@ -4,12 +4,12 @@ commands:
   - script: kubectl exec $(kubectl get po --no-headers | tail -1 | awk '{print $1}') -- dd if=/dev/zero of=/media/discoblocks/same-0/data0 count=1M
   - script: kubectl exec -n pod-with-host-pid $(kubectl get po -n pod-with-host-pid --no-headers | tail -1 | awk '{print $1}') -- dd if=/dev/zero of=/media/discoblocks/once-0/data0 count=1M
   - script: kubectl exec -n kube-system $(kubectl get po -n kube-system -l name=fluentd-elasticsearch --no-headers | tail -1 | awk '{print $1}') -- touch /media/discoblocks/daemon-0/data0
-  - command: sleep 40
+  - command: sleep 60
   - script: kubectl exec $(kubectl get po --no-headers | tail -1 | awk '{print $1}') -- dd if=/dev/zero of=/media/discoblocks/same-0/data0 count=3M
   - script: kubectl exec -n pod-with-host-pid $(kubectl get po -n pod-with-host-pid --no-headers | tail -1 | awk '{print $1}') -- dd if=/dev/zero of=/media/discoblocks/once-0/data0 count=3M
-  - command: sleep 60
+  - command: sleep 90
   - script: kubectl exec $(kubectl get po --no-headers | tail -1 | awk '{print $1}') -- dd if=/dev/zero of=/media/discoblocks/same-1/data1 count=1M
   - script: kubectl exec -n pod-with-host-pid $(kubectl get po -n pod-with-host-pid --no-headers | tail -1 | awk '{print $1}') -- dd if=/dev/zero of=/media/discoblocks/once-1/data1 count=1M
-  - command: sleep 40
+  - command: sleep 60
   - script: kubectl exec $(kubectl get po --no-headers | tail -1 | awk '{print $1}') -- dd if=/dev/zero of=/media/discoblocks/same-1/data1 count=3M
   - script: kubectl exec -n pod-with-host-pid $(kubectl get po -n pod-with-host-pid --no-headers | tail -1 | awk '{print $1}') -- dd if=/dev/zero of=/media/discoblocks/once-1/data1 count=3M
