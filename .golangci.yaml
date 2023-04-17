@@ -59,4 +59,4 @@ linters:
     - deadcode
 
 run:
-  issues-exit-code: 0
+  issues-exit-code: 1
