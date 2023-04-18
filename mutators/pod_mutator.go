@@ -59,6 +59,7 @@ type PodMutator struct {
 //+kubebuilder:webhook:path=/mutate-v1-pod,mutating=true,sideEffects=NoneOnDryRun,failurePolicy=fail,groups="",resources=pods,verbs=create,versions=v1,admissionReviewVersions=v1,name=mpod.kb.io
 
 // Handle pod mutation
+//
 //nolint:gocyclo // It is complex we know
 func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	logger := podMutatorLog.WithValues("req_name", req.Name, "namespace", req.Namespace)
@@ -213,7 +214,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		}
 		logger = logger.WithValues("pvc_name", pvc.Name)
 
-		utils.PVCDecorator(&config, prefix, driver, pvc)
+		utils.PVCDecorator(&config, pvc)
 
 		pvcNamesWithMount := map[string]string{
 			pvc.Name: utils.RenderMountPoint(config.Spec.MountPointPattern, pvc.Name, 0),

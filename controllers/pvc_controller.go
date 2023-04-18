@@ -195,6 +195,7 @@ func (r *PVCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 }
 
 // MonitorVolumes monitors volumes periodycally
+//
 //nolint:gocyclo // It is complex we know
 func (r *PVCReconciler) MonitorVolumes() {
 	logger := logf.Log.WithName("VolumeMonitor")
@@ -571,7 +572,7 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, pod *
 	}
 	logger = logger.WithValues("pvc_name", pvc.Name)
 
-	utils.PVCDecorator(config, prefix, driver, pvc)
+	utils.PVCDecorator(config, pvc)
 
 	scAllowedTopology, err := driver.GetStorageClassAllowedTopology(node)
 	if err != nil {
