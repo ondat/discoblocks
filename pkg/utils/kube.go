@@ -7,7 +7,6 @@ import (
 	"time"
 
 	discoblocksondatiov1 "github.com/ondat/discoblocks/api/v1"
-	"github.com/ondat/discoblocks/pkg/drivers"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -244,7 +243,7 @@ func RenderResizeJob(podName, pvcName, pvName, namespace, nodeName, fs, preResiz
 }
 
 // PVCDecorator decorates new PVC instance
-func PVCDecorator(config *discoblocksondatiov1.DiskConfig, prefix string, driver *drivers.Driver, pvc *corev1.PersistentVolumeClaim) {
+func PVCDecorator(config *discoblocksondatiov1.DiskConfig, pvc *corev1.PersistentVolumeClaim) {
 	pvc.Finalizers = []string{RenderFinalizer(config.Name)}
 
 	pvc.Labels = map[string]string{

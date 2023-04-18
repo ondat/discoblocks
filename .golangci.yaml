@@ -19,7 +19,6 @@ linters-settings:
     require-specific: true
 
 linters:
-  disable-all: true
   enable:
     - bodyclose
     - depguard
@@ -53,10 +52,6 @@ linters:
     - unparam
     - whitespace
     - unused
-    # Deprecated
-    - varcheck
-    - structcheck
-    - deadcode
 
 run:
   issues-exit-code: 1

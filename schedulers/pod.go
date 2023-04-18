@@ -31,7 +31,7 @@ func (s *podSCheduler) Name() string {
 }
 
 // Filter does the filtering
-func (s *podSCheduler) Filter(ctx context.Context, state *framework.CycleState, pod *corev1.Pod, nodeInfo *framework.NodeInfo) *framework.Status {
+func (s *podSCheduler) Filter(ctx context.Context, _ *framework.CycleState, pod *corev1.Pod, nodeInfo *framework.NodeInfo) *framework.Status {
 	logger := s.logger.WithValues("pod_name", pod.Name, "namespace", pod.Namespace, "node", nodeInfo.Node().Name)
 
 	errorStatus := framework.Success
@@ -149,6 +149,6 @@ func (s *podSCheduler) Filter(ctx context.Context, state *framework.CycleState, 
 }
 
 // Factory framework compatible factory
-func (s *podSCheduler) Factory(configuration runtime.Object, f framework.Handle) (framework.Plugin, error) {
+func (s *podSCheduler) Factory(_ runtime.Object, _ framework.Handle) (framework.Plugin, error) {
 	return s, nil
 }

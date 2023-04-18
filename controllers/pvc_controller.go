@@ -572,7 +572,7 @@ func (r *PVCReconciler) createPVC(config *discoblocksondatiov1.DiskConfig, pod *
 	}
 	logger = logger.WithValues("pvc_name", pvc.Name)
 
-	utils.PVCDecorator(config, prefix, driver, pvc)
+	utils.PVCDecorator(config, pvc)
 
 	scAllowedTopology, err := driver.GetStorageClassAllowedTopology(node)
 	if err != nil {

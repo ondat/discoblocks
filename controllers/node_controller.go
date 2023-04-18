@@ -30,7 +30,7 @@ type NodeReconciler struct {
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.11.0/pkg/reconcile
-func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *NodeReconciler) Reconcile(_ context.Context, _ ctrl.Request) (ctrl.Result, error) {
 	return ctrl.Result{}, nil
 }
 

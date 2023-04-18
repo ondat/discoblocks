@@ -214,7 +214,7 @@ func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 		}
 		logger = logger.WithValues("pvc_name", pvc.Name)
 
-		utils.PVCDecorator(&config, prefix, driver, pvc)
+		utils.PVCDecorator(&config, pvc)
 
 		pvcNamesWithMount := map[string]string{
 			pvc.Name: utils.RenderMountPoint(config.Spec.MountPointPattern, pvc.Name, 0),
