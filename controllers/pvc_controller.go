@@ -195,6 +195,7 @@ func (r *PVCReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 }
 
 // MonitorVolumes monitors volumes periodycally
+//
 //nolint:gocyclo // It is complex we know
 func (r *PVCReconciler) MonitorVolumes() {
 	logger := logf.Log.WithName("VolumeMonitor")

@@ -59,6 +59,7 @@ type PodMutator struct {
 //+kubebuilder:webhook:path=/mutate-v1-pod,mutating=true,sideEffects=NoneOnDryRun,failurePolicy=fail,groups="",resources=pods,verbs=create,versions=v1,admissionReviewVersions=v1,name=mpod.kb.io
 
 // Handle pod mutation
+//
 //nolint:gocyclo // It is complex we know
 func (a *PodMutator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	logger := podMutatorLog.WithValues("req_name", req.Name, "namespace", req.Namespace)
